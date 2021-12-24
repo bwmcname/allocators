@@ -6,7 +6,7 @@ struct mallocator
     DECLARE_ALLOCATOR_INTERFACE_METHODS();
 };
 
-#ifdef BM_CHECKED_FIXED_ALLOCATOR_IMPLEMENTATION
+#ifdef BM_MALLOCATOR_IMPLEMENTATION
 #include <stdlib.h>
 
 void *

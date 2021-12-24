@@ -19,9 +19,9 @@
 #include "checked_fixed_allocator.h"
 #undef BM_CHECKED_FIXED_ALLOCATOR_IMPLEMENTATION
 
-#define BM_CHECKED_FIXED_ALLOCATOR_IMPLEMENTATION
+#define BM_MALLOCATOR_IMPLEMENTATION
 #include "mallocator.h"
-#undef BM_CHECKED_FIXED_ALLOCATOR_IMPLEMENTATION
+#undef BM_MALLOCATOR_IMPLEMENTATION
 
 void CheckForLeaks(alloc_block *block)
 {
