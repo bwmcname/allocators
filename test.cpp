@@ -19,6 +19,10 @@
 #include "checked_fixed_allocator.h"
 #undef BM_CHECKED_FIXED_ALLOCATOR_IMPLEMENTATION
 
+#define BM_CHECKED_FIXED_ALLOCATOR_IMPLEMENTATION
+#include "mallocator.h"
+#undef BM_CHECKED_FIXED_ALLOCATOR_IMPLEMENTATION
+
 void CheckForLeaks(alloc_block *block)
 {
     if (block != nullptr)
@@ -32,29 +36,6 @@ void CheckForLeaks(alloc_block *block)
             current_block = current_block->next;
         } while (current_block);
     }
-}
-
-struct Mallocator
-{
-    DECLARE_ALLOCATOR_INTERFACE_METHODS();
-};
-
-void *
-Mallocator::AllocInternal(size_t size, uint32_t alignment, int line, const char *file)
-{
-    return _aligned_malloc(size, alignment);
-}
-
-void
-Mallocator::FreeInternal(void *addr, int line, const char *file)
-{
-    _aligned_free(addr);
-}
-
-void *
-Mallocator::ReAllocInternal(void *addr, size_t size, int line, const char *file)
-{
-    return realloc(addr, size);
 }
 
 static constexpr size_t Kilobytes(size_t num)
@@ -163,6 +144,6 @@ int main()
     win32_virtual_memory_interface mem;
     MemoryInterfaceTests(&mem);
 
-    Mallocator mallocator;
+    mallocator mallocator;
     FixedAllocatorTests(&mallocator);
 }
