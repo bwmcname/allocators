@@ -12,9 +12,9 @@ struct alloc_block
 template <typename allocator_interface>
 struct checked_fixed_allocator
 {
+    uint32_t align_correction;
     fixed_size_allocator<allocator_interface> internal_allocator;
     alloc_block *head;
-    uint32_t align_correction;
 
     checked_fixed_allocator(allocator_interface *memory_provider, size_t chunk_count, size_t chunk_size, uint32_t chunk_alignment);
     checked_fixed_allocator(const checked_fixed_allocator &) = delete;
@@ -26,7 +26,9 @@ struct checked_fixed_allocator
 };
 
 #if !defined(BM_ASSERT)
+#pragma warning(push, 0)
 #include <assert.h>
+#pragma warning(pop)
 #define BM_ASSERT(val) assert(val)
 #endif
 
@@ -48,10 +50,10 @@ checked_fixed_allocator<allocator_interface>::checked_fixed_allocator(
     allocator_interface *memory_provider,
     size_t chunk_count,
     size_t chunk_size,
-    uint32_t chunk_alignment)
-    : align_correction(sizeof(alloc_block) + (sizeof(alloc_block) % chunk_alignment)),
-      internal_allocator(memory_provider, chunk_count, chunk_size + align_correction, alignof(alloc_block) > chunk_alignment ? alignof(alloc_block) : chunk_alignment),
-      head(nullptr)
+    uint32_t chunk_alignment) :
+    align_correction(sizeof(alloc_block) + (sizeof(alloc_block) % chunk_alignment)),
+    internal_allocator(memory_provider, chunk_count, chunk_size + align_correction, alignof(alloc_block) > chunk_alignment ? alignof(alloc_block) : chunk_alignment),
+    head(nullptr)
 {
 }
 
@@ -111,6 +113,6 @@ void checked_fixed_allocator<allocator_interface>::FreeInternal(void *addr, int 
 template <typename allocator_interface>
 void *checked_fixed_allocator<allocator_interface>::ReAllocInternal(void *addr, size_t size, int line, const char *file)
 {
-    BM_ASSERT(false);
-    return internal_allocator.ReAllocInternal(addr, size, line, file);
+    BM_ASSERT(false, "Unimplemented");
+    return nullptr;
 }

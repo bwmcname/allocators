@@ -1,6 +1,8 @@
 
 #pragma once
+#pragma warning(push, 0)
 #include <stdint.h>
+#pragma warning(pop)
 
 #define DECLARE_ALLOCATOR_INTERFACE_METHODS()                                         \
     void *AllocInternal(size_t size, uint32_t alignment, int line, const char *file); \

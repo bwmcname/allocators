@@ -1,6 +1,9 @@
 #pragma once
 #include "allocator_interface.h"
+
+#pragma warning(push, 0)
 #include <stdint.h>
+#pragma warning(pop)
 
 struct free_chunk
 {
@@ -27,7 +30,9 @@ struct fixed_size_allocator
 #define ALLOC_ONE() AllocInternal(0, 0, __LINE__, __FILE__)
 
 #if !defined(BM_ASSERT)
+#pragma warning(push, 0)
 #include <assert.h>
+#pragma warning(pop)
 #define BM_ASSERT(val) assert(val)
 #endif
 
@@ -41,7 +46,7 @@ fixed_size_allocator<allocator_interface>::fixed_size_allocator(
 {
     size_t required_bytes = chunk_count * chunk_size;
 	base = memory_provider->ALLOC(required_bytes, chunk_alignment);
-	BM_ASSERT(base);
+	BM_ASSERT(base, "Failed to allocate enough memory");
 
 	uint8_t *base_byte = (uint8_t *)base;
 	free_chunk *last_chunk = 0;
@@ -70,7 +75,12 @@ fixed_size_allocator<allocator_interface>::~fixed_size_allocator()
 
 template <typename allocator_interface>
 void *fixed_size_allocator<allocator_interface>::AllocInternal(size_t size, uint32_t alignment, int line, const char *file)
-{    
+{
+    (void)size;
+    (void)line;
+    (void)file;
+    (void)alignment;
+
 	if (next_free == nullptr)
 	{
 		return nullptr;
@@ -84,6 +94,9 @@ void *fixed_size_allocator<allocator_interface>::AllocInternal(size_t size, uint
 template <typename allocator_interface>
 void fixed_size_allocator<allocator_interface>::FreeInternal(void *addr, int line, const char *file)
 {
+    (void)line;
+    (void)file;
+    
 	free_chunk *chunk = (free_chunk *)addr;
 	chunk->next_free = next_free;
 	next_free = chunk;
@@ -93,6 +106,6 @@ template <typename allocator_interface>
 void *fixed_size_allocator<allocator_interface>::ReAllocInternal(void *addr, size_t size, int line, const char *file)
 {
 	// Maybe there is something clever we can do here... dunno.
-    BM_ASSERT(false);
+    BM_ASSERT(false, "Unimplemented");
 	return nullptr;
 }
