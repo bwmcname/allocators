@@ -8,7 +8,7 @@
 #endif
 #pragma warning(pop)
 
-#define NODES_ENABLED 1
+#define NODES_ENABLED 0
 
 struct block_header
 {
@@ -89,6 +89,8 @@ struct free_list_allocator
     bool CanSwapNodes(free_block *nodeOld, free_block *nodeNew);
     void SwapNodes(free_block *nodeOld, free_block *nodeNew);
     bool CanChangeNodeSize(free_block *node, size_t newSize);
+    void LeftRotate(free_block *node);
+    void RightRotate(free_block *node);
 
     // Corruption detection.
     void DetectCorruption();
@@ -97,6 +99,7 @@ struct free_list_allocator
     void ValidateFreeListLinks();
     void ValidateBSTNodeLinks();
     void ValidateFreeListAllocatorMembers();
+    void ValidateRedBlackProperties();
 #ifdef USE_STL
     void ValidateFreeNodesInTree();
     void ValidateBSTUniqueness();
@@ -141,7 +144,7 @@ static void ValidateBSTInternal(free_block *block, size_t min, size_t max)
 
     if (block->left)
     {
-        BM_ASSERT(block->left->header.size < block->header.size, "BST rules broken");
+        BM_ASSERT(block->left->header.size <= block->header.size, "BST rules broken");
         BM_ASSERT(block->left->header.size >= min, "BST rules broken");
         BM_ASSERT(block->left->header.size <= max, "BST rules broken");
 
@@ -169,6 +172,41 @@ void free_list_allocator<memory_interface, max_alignment>::ValidateBST()
     }
 
     ValidateBSTInternal(root, 0, SIZE_MAX);
+}
+
+static int ValidateRedBlackNodeInternal(free_block *node)
+{
+    if (node == nullptr)
+    {
+        return 0;
+    }
+
+    int crossedBlack;
+
+    if (node->color == Red)
+    {
+        BM_ASSERT(!node->left || node->left->color == Black, "Red node's children not black.");
+        BM_ASSERT(!node->right || node->right->color == Black, "Red node's children not black.");
+        crossedBlack = 0;
+    }
+    else
+    {
+        crossedBlack = 1;
+    }
+
+    int leftBlacks = ValidateRedBlackNodeInternal(node->left);
+    int rightBlacks = ValidateRedBlackNodeInternal(node->right);
+
+    BM_ASSERT(leftBlacks == rightBlacks, "Number of black nodes in path from leafs not equal.");
+    return leftBlacks + crossedBlack;
+}
+
+template <typename memory_interface, size_t max_alignment>
+void free_list_allocator<memory_interface, max_alignment>::ValidateRedBlackProperties()
+{
+    BM_ASSERT(root->color == Black, "Root node of a red black tree must be black.");
+
+    ValidateRedBlackNodeInternal(root);
 }
 
 void ValidateBSTNodeLinksInternal(free_block *node)
@@ -354,6 +392,7 @@ void free_list_allocator<memory_interface, max_alignment>::DetectCorruption()
 #if NODES_ENABLED
     ValidateBSTNodeLinks();
     ValidateBST();
+    ValidateRedBlackProperties();
 
 #ifdef USE_STL
     ValidateFreeNodesInTree();
@@ -388,7 +427,7 @@ free_list_allocator<memory_interface, max_alignment>::free_list_allocator(
     root->left = nullptr;
     root->right = nullptr;
     root->parent = nullptr;
-    root->color = Red;
+    root->color = Black; 
 
     first = &root->header;
     last = first;
@@ -522,6 +561,7 @@ void free_list_allocator<memory_interface, max_alignment>::SwapNodes(free_block 
     nodeNew->parent = nodeOld->parent;
     nodeNew->left = nodeOld->left;
     nodeNew->right = nodeOld->right;
+    nodeNew->color = nodeOld->color;
 #else
     (void)nodeOld;
     (void)nodeNew;
@@ -646,15 +686,9 @@ void *free_list_allocator<memory_interface, max_alignment>::AllocInternal(size_t
                 SwapNodes(toCombine, newBlock);
                 RemoveNode(bestFit);
             }
-
-            ValidateHeaderIntersection(bestFit, newBlock);
-            ValidateHeaderIntersection(bestFit, toCombine);
-            ValidateHeaderIntersection(newBlock, toCombine);
         }
         else
         {
-            ValidateHeaderIntersection(newBlock, bestFit);
-
             if (bestFit->header.next) bestFit->header.next->prev = (block_header *)newBlock;
             newBlock->header.next = bestFit->header.next;
             newBlock->header.size = leftover - chunk_size;
@@ -931,26 +965,83 @@ free_block *free_list_allocator<memory_interface, max_alignment>::FindBestFit(si
         }
     }
     #else
+    block_header *lowest = nullptr;
     for (block_header *current = first;
          current;
          current = current->next)
     {
         if (size <= current->size)
         {
-            return (free_block *)current;
+            if (lowest)
+            {
+                if (current->size < lowest->size)
+                {
+                    lowest = current;
+                }
+            }
+            else
+            {
+                lowest = current;
+            }
         }
     }
 
-    return nullptr;
+    return (free_block *)lowest;
     #endif
 }
 
-static int counter = 0;
+template <typename memory_interface, size_t max_alignment>
+void free_list_allocator<memory_interface, max_alignment>::LeftRotate(free_block *node)
+{
+    free_block *rotator = node->right;
+    node->right = rotator->left;
+    if (rotator->left) rotator->left->parent = node;
+    rotator->parent = node->parent;
+    if (node == root)
+    {
+        root = rotator;
+    }
+    else if (node == node->parent->left)
+    {
+        node->parent->left = rotator;
+    }
+    else // node is right child
+    {
+        node->parent->right = rotator;
+    }
+
+    rotator->left = node;
+    node->parent = rotator;
+}
+
+template <typename memory_interface, size_t max_alignment>
+void free_list_allocator<memory_interface, max_alignment>::RightRotate(free_block *node)
+{
+    free_block *rotator = node->left;
+    node->left = rotator->right;
+    if (rotator->right) rotator->right->parent = node;
+    rotator->parent = node->parent;
+    if (node == root)
+    {
+        root = rotator;
+    }
+    else if (node == node->parent->right)
+    {
+        node->parent->right = rotator;
+    }
+    else // node is left child
+    {
+        node->parent->left = rotator;
+    }
+    rotator->right = node;
+    node->parent = rotator;
+}
 
 template <typename memory_interface, size_t max_alignment>
 void free_list_allocator<memory_interface, max_alignment>::AddNode(free_block *block)
 {
 #if NODES_ENABLED
+    // Add the node
     block->left = nullptr;
     block->right = nullptr;
 
@@ -958,6 +1049,7 @@ void free_list_allocator<memory_interface, max_alignment>::AddNode(free_block *b
     {
         root = block;
         block->parent = nullptr;
+        block->color = Black;
         return;
     }
 
@@ -970,7 +1062,7 @@ void free_list_allocator<memory_interface, max_alignment>::AddNode(free_block *b
             {
                 current->right = block;
                 block->parent = current;
-                return;
+                break;
             }
 
             current = current->right;
@@ -981,12 +1073,82 @@ void free_list_allocator<memory_interface, max_alignment>::AddNode(free_block *b
             {
                 current->left = block;
                 block->parent = current;
-                return;
+                break;
             }
 
             current = current->left;
         }
     }
+
+    // Do rb tree balance operations
+    block->color = Red;
+    current = block;
+    while (current && current->parent && current->parent->color == Red)
+    {
+        BM_ASSERT(current->color = Red, "Expected Red Node");
+
+        free_block *uncle;
+        bool parentIsLeft;
+        if (current->parent->parent)
+        {
+            parentIsLeft = current->parent->parent->left == current->parent;
+            if (parentIsLeft)
+            {
+                uncle = current->parent->parent->right;
+            }
+            else
+            {
+                uncle = current->parent->parent->left;
+            }
+        }
+        else
+        {
+            // no grandparent, no rebalancing needed
+            return;
+        }
+
+        if (uncle && uncle->color == Red)
+        {
+            // color flip case
+            // Mark both the parent and uncle as black
+            // The grandparent is now red
+            current->parent->color = Black;
+            uncle->color = Black;
+            if (current->parent->parent != root) current->parent->parent->color = Red;
+            current = current->parent->parent;
+        }
+        else // uncle is black
+        {
+            bool newIsLeft = current->parent->left == current;
+            current = current->parent;
+            if (parentIsLeft)
+            {
+                if (!newIsLeft)
+                {
+                    LeftRotate(current);
+                    current = current->parent;
+                }
+
+                RightRotate(current->parent);
+            }
+            else // parent is a right  child
+            {
+                if (newIsLeft)
+                {
+                    RightRotate(current);
+                    current = current->parent;
+                }
+
+                LeftRotate(current->parent);
+            }
+
+            if (current->left) current->left->color = Red;
+            if (current->right) current->right->color = Red;
+            current->color = Black;
+            return;
+        }
+    }
+
 #else
     (void)block;
 #endif
@@ -996,66 +1158,85 @@ template <typename memory_interface, size_t max_alignment>
 void free_list_allocator<memory_interface, max_alignment>::RemoveNode(free_block *block)
 {
 #if NODES_ENABLED
-    free_block **ptrFromParent;
-    if (root == block)
-    {
-        ptrFromParent = &root;
-    }
-    else
-    {
-        if (block->parent->left == block)
-        {
-            ptrFromParent = &block->parent->left;
-        }
-        else
-        {
-            ptrFromParent = &block->parent->right;
-        }
-    }
 
+    // Will need these later for rebalancing
+    free_block *doubleBlack = nullptr;
+    free_block *dbParent = nullptr;
+    free_block *dbSibling = nullptr;
+    bool dbIsLeft;
+    bool toReplaceWasLeaf = false;
+    
     free_block *toReplace;
     if (block->left && block->right)
     {
-        toReplace = block->right;
-        if (toReplace->left)
+        toReplace = block->left;
+        if (toReplace->right)
         {
             do
             {
-                toReplace = toReplace->left;
+                toReplace = toReplace->right;
             }
-            while (toReplace->left);
+            while (toReplace->right);
 
-            toReplace->parent->left = toReplace->right;
-            if (toReplace->right)
+            toReplaceWasLeaf = !toReplace->left && !toReplace->right;
+
+            // Set the double black position before we reposition the toReplace node.
+            dbParent = toReplace->parent;
+            dbSibling = toReplace->parent->left;
+            dbIsLeft = false;
+
+            toReplace->parent->right = toReplace->left;
+            if (toReplace->left)
             {
-                toReplace->right->parent = toReplace->parent;
+                toReplace->left->parent = toReplace->parent;
             }
 
             toReplace->parent = block->parent;
-            toReplace->left = block->left;
-            block->left->parent = toReplace;
             toReplace->right = block->right;
             block->right->parent = toReplace;
+            toReplace->left = block->left;
+            block->left->parent = toReplace;
         }
         else
         {
-            toReplace->left = block->left;
-            block->left->parent = toReplace;
+            toReplaceWasLeaf = !toReplace->left && !toReplace->right;
+
+            // Set the double black position before we reposition the toReplace node.
+            dbParent = toReplace;
+            dbSibling = block->right;
+            dbIsLeft = true;
+
+            toReplace->right = block->right;
+            block->right->parent = toReplace;
             toReplace->parent = block->parent;
         }
     }
     else if (block->left)
     {
+        dbParent = block->parent;
+        dbSibling = nullptr;
+        dbIsLeft = true;
+
         toReplace = block->left;
+        toReplaceWasLeaf = !toReplace->left && !toReplace->right;
         block->left->parent = block->parent;
     }
     else if (block->right)
     {
+        dbParent = block->parent;
+        dbSibling = nullptr;
+        dbIsLeft = false;
+
         toReplace = block->right;
+        toReplaceWasLeaf = !toReplace->left && !toReplace->right;
         block->right->parent = block->parent;
     }
     else
     {
+        dbParent = block->parent;
+        dbIsLeft = dbParent->left == block;
+        dbSibling = dbIsLeft ? dbParent->right : dbParent->left;
+        
         toReplace = nullptr;
     }
 
@@ -1074,6 +1255,164 @@ void free_list_allocator<memory_interface, max_alignment>::RemoveNode(free_block
             block->parent->right = toReplace;
         }
     }
+
+    // rb tree fixup
+    if ((!toReplace && block->color == Red) ||
+        (toReplace && toReplace->color == Red && toReplaceWasLeaf))
+    {
+        if (block->color == Black)
+        {
+            toReplace->color = Black;
+        }
+
+        // case 1.
+        // Deleting a red leaf, no fixup needed
+        return;
+    }
+
+    if (doubleBlack && !doubleBlack->left && !doubleBlack->right)
+    {
+        doubleBlack->color = Black;
+        return;
+    }
+
+    if (toReplace) toReplace->color = block->color;
+
+    for (;;)
+    {
+        if (doubleBlack == root)
+        {
+            // case 2.
+            doubleBlack->color = Black;
+            break;
+        }
+
+        bool isLeft;
+        if (!doubleBlack)
+        {
+            isLeft = dbIsLeft;
+        }
+        else
+        {
+            isLeft = dbParent->left == doubleBlack;
+        }
+        
+        free_block *sibling = isLeft ? dbParent->right : dbParent->left;
+
+        if (!sibling ||
+            (sibling->color == Black &&
+             (!sibling->left || sibling->left->color == Black) &&
+             (!sibling->right || sibling->right->color == Black)))
+        {
+            // case 3.
+            if (sibling) sibling->color = Red;
+            if (dbParent->color == Black)
+            {
+                doubleBlack = dbParent;
+                dbParent = doubleBlack->parent;
+                if (dbParent)
+                {
+                    dbIsLeft = dbParent->left == doubleBlack;
+                    dbSibling = dbIsLeft ? dbParent->left : dbParent->right;
+                }
+                else
+                {
+                    dbSibling = nullptr;
+                }
+                
+                continue;
+            }
+            else
+            {
+                dbParent->color = Black;
+                break;
+            }
+        }
+
+        if (sibling->color == Red)
+        {
+            // case 4.
+            bool temp = sibling->color;
+            sibling->color = dbParent->color;
+            dbParent->color = temp;
+
+            // Because we rotated in the direction of the db, only the sibling has changed.
+
+            if (isLeft)
+            {
+                LeftRotate(dbParent);
+                sibling = dbParent->right;
+            }
+            else
+            {
+                RightRotate(dbParent);
+                sibling = dbParent->right;
+            }
+            
+            continue;
+        }
+
+        free_block *farNiece;
+        free_block *nearNiece;
+        if (isLeft)
+        {
+            farNiece = sibling->right;
+            nearNiece = sibling->left;
+        }
+        else
+        {
+            farNiece = sibling->left;
+            nearNiece = sibling->right;
+        }
+
+        if (sibling->color == Black &&
+            (!farNiece || farNiece->color == Black) &&
+            (nearNiece && nearNiece->color == Red))
+        {
+            // case 5
+            nearNiece->color = sibling->color;
+            sibling->color = Red;
+
+            if (isLeft)
+            {
+                RightRotate(sibling);
+                sibling = sibling->parent;
+                farNiece = sibling->right;
+            }
+            else
+            {
+                LeftRotate(sibling);
+                sibling = sibling->parent;
+                farNiece = sibling->left;
+            }
+
+            goto case6;
+        }
+
+        if (sibling->color == Black &&
+            (farNiece && farNiece->color == Red))
+        {
+            // case 6
+          case6:
+            bool temp = sibling->color;
+            sibling->color = dbParent->color;
+            dbParent->color = temp;
+
+            if (isLeft)
+            {
+                LeftRotate(dbParent);
+            }
+            else
+            {
+                RightRotate(dbParent);
+            }
+            
+            if (doubleBlack) doubleBlack->color = Black;
+            if (farNiece) farNiece->color = Black;
+            break;
+        }   
+    }
+
 #else
     (void)block;
 #endif

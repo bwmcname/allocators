@@ -15,6 +15,8 @@
 #include <unordered_set>
 #pragma warning(pop)
 
+#define CORRUPTION_DETECTION_ENABLED 0
+
 FILE *testLog = nullptr;
 void MyAssert(bool value, const char *message, int line, const char *file)
 {
@@ -212,6 +214,7 @@ void SlowRandomAllocTests(allocator_t *allocator)
     std::map<void *, size_t> allocations;
     std::unordered_map<void *, char *> allocatedStrings;
 
+    uint64_t begin = __rdtsc();
     int actionCount = 10000;
     for (int i = 0; i < actionCount; ++i)
     {        
@@ -224,7 +227,6 @@ void SlowRandomAllocTests(allocator_t *allocator)
             memset(ptr, 0xFA, size);
 
             allocations[ptr] = size;
-            allocator->DetectCorruption();
         }
         else if (val < 9)
         {
@@ -246,8 +248,6 @@ void SlowRandomAllocTests(allocator_t *allocator)
                 it->second = newSize;
                 memset((uint8_t *)ptr + oldSize, 0xFA, newSize - oldSize);
             }
-
-            allocator->DetectCorruption();
         }
         else
         {
@@ -271,12 +271,16 @@ void SlowRandomAllocTests(allocator_t *allocator)
             }
                         
             allocator->FREE(it->first);
-            allocator->DetectCorruption();
             allocations.erase(it);
         }
+
+#if CORRUPTION_DETECTION_ENABLED 
+        allocator->DetectCorruption();
+#endif
     }
 
-    printf("SUCCESS\n");
+    uint64_t total = __rdtsc() - begin;
+    printf("SUCCESS [Elapsed=%llu]\n", total);
 }
 
 int main()
