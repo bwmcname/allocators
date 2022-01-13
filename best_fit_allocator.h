@@ -9,7 +9,7 @@
 #endif
 #pragma warning(pop)
 
-#define NODES_ENABLED 1
+#define NODES_ENABLED 0
 
 #ifdef _MSC_VER
 #define BM_RESTRICT __restrict
@@ -1214,7 +1214,7 @@ void best_fit_allocator<memory_interface, max_alignment>::RemoveNode(free_block 
     // Will need these later for rebalancing
     free_block *doubleBlack = nullptr;
     free_block *dbParent = nullptr;
-    bool dbIsLeft;
+    bool dbIsLeft = false;
     bool toReplaceWasLeaf = false;
 
     // Perform the standard BST removal
@@ -1282,7 +1282,10 @@ void best_fit_allocator<memory_interface, max_alignment>::RemoveNode(free_block 
     else
     {
         dbParent = block->GetParent();
-        dbIsLeft = dbParent->left == block;
+        if (dbParent)
+        {
+            dbIsLeft = dbParent->left == block;
+        }
         
         toReplace = nullptr;
     }
@@ -1301,6 +1304,12 @@ void best_fit_allocator<memory_interface, max_alignment>::RemoveNode(free_block 
         {
             block->GetParent()->right = toReplace;
         }
+    }
+
+    if (root == nullptr)
+    {
+        // We must have removed the root.
+        return;
     }
 
     // rb tree fixup
