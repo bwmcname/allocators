@@ -215,12 +215,12 @@ void SlowRandomAllocTests(allocator_t *allocator)
     std::unordered_map<void *, char *> allocatedStrings;
 
     uint64_t begin = __rdtsc();
-    int actionCount = 100000;
+    int actionCount = 1000000;
     for (int i = 0; i < actionCount; ++i)
     {        
         int val = rand() % 10;
 
-        if (val < 8)
+        if (val < 6)
         {
             size_t size = (rand() % Megabytes(512)) + 1; // atleast one byte
             void *ptr = allocator->ALLOC(size, 1);
@@ -228,7 +228,7 @@ void SlowRandomAllocTests(allocator_t *allocator)
 
             allocations[ptr] = size;
         }
-        else if (val < 9)
+        else if (val < 7)
         {
             size_t numAllocations = allocations.size();
             if (numAllocations == 0)
@@ -293,8 +293,9 @@ int main()
 
     win32_virtual_memory_interface mem;
     // MemoryInterfaceTests(&mem);
-    
-    best_fit_allocator<win32_virtual_memory_interface> allocator(&mem, Gigabytes(2));
+
+    // Reserve 8 gigabytes
+    best_fit_allocator<win32_virtual_memory_interface> allocator(&mem, Gigabytes(8));
     SlowRandomAllocTests(&allocator);
 
     // FixedAllocatorTests(&allocator);

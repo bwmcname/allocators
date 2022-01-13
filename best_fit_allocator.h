@@ -1,8 +1,9 @@
 #pragma once
 
-#pragma warning(push, 0)
-#include <stddef.h>
+#include "memory_interface.h"
+#include "allocator_interface.h"
 
+#pragma warning(push, 0)
 #ifdef USE_STL
 #include <unordered_map>
 #endif
@@ -37,11 +38,13 @@ static constexpr bool IsPowerOf2(size_t value)
     return value && !(value & (value - 1));
 }
 
+#pragma warning(suppress: 4514)
 static constexpr size_t SnapUpToPow2Increment(size_t value, size_t increment)
 {
     return (value + increment - 1) & ~(increment - 1);
 }
 
+#pragma warning(suppress: 4514)
 static constexpr size_t SnapUpToIncrement(size_t value, size_t increment)
 {
     return increment * ((value / increment) + (value % increment == 0 ? 0 : 1));
@@ -53,7 +56,7 @@ static inline void *SnapUpToPow2Increment(void *value, size_t increment)
     return (void *)SnapUpToPow2Increment((size_t)value, increment);
 }
 
-template <typename memory_interface, size_t max_alignment=alignof(max_align_t)>
+template <typename memory_interface, size_t max_alignment=16>
 struct best_fit_allocator
 {
     static_assert(IsPowerOf2(max_alignment), "max_alignment must be a power of 2");
@@ -222,6 +225,7 @@ free_block *best_fit_allocator<memory_interface, max_alignment>::GetBlockHeader(
     return (free_block *)((uint8_t *)addr - chunk_size);
 }
 
+#pragma warning(suppress: 4514)
 inline size_t GetAlignment(void *addr)
 {
     size_t data = (size_t)addr;
@@ -1093,7 +1097,7 @@ void best_fit_allocator<memory_interface, max_alignment>::AddNode(free_block *bl
     current = block;
     while (current && current->parent && current->parent->color == Red)
     {
-        BM_ASSERT(current->color = Red, "Expected Red Node");
+        BM_ASSERT(current->color == Red, "Expected Red Node");
 
         free_block *uncle;
         bool parentIsLeft;
@@ -1170,7 +1174,6 @@ void best_fit_allocator<memory_interface, max_alignment>::RemoveNode(free_block 
     // Will need these later for rebalancing
     free_block *doubleBlack = nullptr;
     free_block *dbParent = nullptr;
-    free_block *dbSibling = nullptr;
     bool dbIsLeft;
     bool toReplaceWasLeaf = false;
 
@@ -1191,7 +1194,6 @@ void best_fit_allocator<memory_interface, max_alignment>::RemoveNode(free_block 
 
             // Set the double black position before we reposition the toReplace node.
             dbParent = toReplace->parent;
-            dbSibling = toReplace->parent->left;
             dbIsLeft = false;
 
             toReplace->parent->right = toReplace->left;
@@ -1212,7 +1214,6 @@ void best_fit_allocator<memory_interface, max_alignment>::RemoveNode(free_block 
 
             // Set the double black position before we reposition the toReplace node.
             dbParent = toReplace;
-            dbSibling = block->right;
             dbIsLeft = true;
 
             toReplace->right = block->right;
@@ -1223,7 +1224,6 @@ void best_fit_allocator<memory_interface, max_alignment>::RemoveNode(free_block 
     else if (block->left)
     {
         dbParent = block->parent;
-        dbSibling = nullptr;
         dbIsLeft = true;
 
         toReplace = block->left;
@@ -1233,7 +1233,6 @@ void best_fit_allocator<memory_interface, max_alignment>::RemoveNode(free_block 
     else if (block->right)
     {
         dbParent = block->parent;
-        dbSibling = nullptr;
         dbIsLeft = false;
 
         toReplace = block->right;
@@ -1244,7 +1243,6 @@ void best_fit_allocator<memory_interface, max_alignment>::RemoveNode(free_block 
     {
         dbParent = block->parent;
         dbIsLeft = dbParent->left == block;
-        dbSibling = dbIsLeft ? dbParent->right : dbParent->left;
         
         toReplace = nullptr;
     }
@@ -1295,18 +1293,8 @@ void best_fit_allocator<memory_interface, max_alignment>::RemoveNode(free_block 
             doubleBlack->color = Black;
             break;
         }
-
-        bool isLeft;
-        if (!doubleBlack)
-        {
-            isLeft = dbIsLeft;
-        }
-        else
-        {
-            isLeft = dbParent->left == doubleBlack;
-        }
-       
-        free_block *sibling = isLeft ? dbParent->right : dbParent->left;
+        
+        free_block *sibling = dbIsLeft ? dbParent->right : dbParent->left;
 
         if (!sibling ||
             (sibling->color == Black &&
@@ -1322,11 +1310,6 @@ void best_fit_allocator<memory_interface, max_alignment>::RemoveNode(free_block 
                 if (dbParent)
                 {
                     dbIsLeft = dbParent->left == doubleBlack;
-                    dbSibling = dbIsLeft ? dbParent->left : dbParent->right;
-                }
-                else
-                {
-                    dbSibling = nullptr;
                 }
                 
                 continue;
@@ -1347,7 +1330,7 @@ void best_fit_allocator<memory_interface, max_alignment>::RemoveNode(free_block 
 
             // Because we rotated in the direction of the db, only the sibling has changed.
 
-            if (isLeft)
+            if (dbIsLeft)
             {
                 LeftRotate(dbParent);
                 sibling = dbParent->right;
@@ -1363,7 +1346,7 @@ void best_fit_allocator<memory_interface, max_alignment>::RemoveNode(free_block 
 
         free_block *farNiece;
         free_block *nearNiece;
-        if (isLeft)
+        if (dbIsLeft)
         {
             farNiece = sibling->right;
             nearNiece = sibling->left;
@@ -1382,7 +1365,7 @@ void best_fit_allocator<memory_interface, max_alignment>::RemoveNode(free_block 
             nearNiece->color = sibling->color;
             sibling->color = Red;
 
-            if (isLeft)
+            if (dbIsLeft)
             {
                 RightRotate(sibling);
                 sibling = sibling->parent;
@@ -1407,7 +1390,7 @@ void best_fit_allocator<memory_interface, max_alignment>::RemoveNode(free_block 
             sibling->color = dbParent->color;
             dbParent->color = temp;
 
-            if (isLeft)
+            if (dbIsLeft)
             {
                 LeftRotate(dbParent);
             }
