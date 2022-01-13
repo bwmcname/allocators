@@ -8,7 +8,7 @@
 #endif
 #pragma warning(pop)
 
-#define NODES_ENABLED 0
+#define NODES_ENABLED 1
 
 struct block_header
 {
@@ -54,18 +54,18 @@ static inline void *SnapUpToPow2Increment(void *value, size_t increment)
 }
 
 template <typename memory_interface, size_t max_alignment=alignof(max_align_t)>
-struct free_list_allocator
+struct best_fit_allocator
 {
     static_assert(IsPowerOf2(max_alignment), "max_alignment must be a power of 2");
     static constexpr size_t chunk_size = SnapUpToPow2Increment(sizeof(block_header), max_alignment);
     static constexpr size_t free_block_overhead = SnapUpToIncrement(sizeof(free_block), chunk_size);
     static constexpr size_t smallest_valid_free_block = free_block_overhead > (2 * chunk_size) ? free_block_overhead : (2 * chunk_size);
 
-    free_list_allocator(memory_interface *memoryProvider, size_t minimumReservation);
-    free_list_allocator(const free_list_allocator &) = delete;
-    free_list_allocator() = delete;
+    best_fit_allocator(memory_interface *memoryProvider, size_t minimumReservation);
+    best_fit_allocator(const best_fit_allocator &) = delete;
+    best_fit_allocator() = delete;
 
-    ~free_list_allocator();
+    ~best_fit_allocator();
 
     memory_interface *memory_provider;
 
@@ -114,30 +114,7 @@ struct free_list_allocator
 #define BM_ASSERT(val, msg) assert(val)
 #endif
 
-template <typename memory_interface, size_t max_alignment>
-void *free_list_allocator<memory_interface, max_alignment>::GetAllocationPtr(free_block *block)
-{
-    return (void *)((uint8_t *)block + chunk_size);
-}
-
-template <typename memory_interface, size_t max_alignment>
-void *free_list_allocator<memory_interface, max_alignment>::GetAllocationPtr(block_header *block)
-{
-    return GetAllocationPtr((free_block *)block);
-}
-
-template <typename memory_interface, size_t max_alignment>
-free_block *free_list_allocator<memory_interface, max_alignment>::GetBlockHeader(void *addr)
-{
-    return (free_block *)((uint8_t *)addr - chunk_size);
-}
-
-inline size_t GetAlignment(void *addr)
-{
-    size_t data = (size_t)addr;
-    return ((data - 1) & ~data) + 1;
-}
-
+#ifdef BM_BEST_FIT_ALLOCATOR_IMPLEMENTATION
 static void ValidateBSTInternal(free_block *block, size_t min, size_t max)
 {
     // BM_ASSERT(block->header.free, "Non-free block in BST");
@@ -161,17 +138,6 @@ static void ValidateBSTInternal(free_block *block, size_t min, size_t max)
         size_t childMin = block->header.size;
         ValidateBSTInternal(block->right, childMin, max);
     }
-}
-
-template <typename memory_interface, size_t max_alignment>
-void free_list_allocator<memory_interface, max_alignment>::ValidateBST()
-{
-    if (!root)
-    {
-        return;
-    }
-
-    ValidateBSTInternal(root, 0, SIZE_MAX);
 }
 
 static int ValidateRedBlackNodeInternal(free_block *node)
@@ -201,8 +167,80 @@ static int ValidateRedBlackNodeInternal(free_block *node)
     return leftBlacks + crossedBlack;
 }
 
+#ifdef USE_STL
+
+static void ValidateFreeNodesInTreeInternal(std::unordered_set<block_header *> *freeBlocks, free_block *node)
+{
+    if (!node)
+    {
+        return;
+    }
+
+    if (node->header.free)
+    {
+        auto it = freeBlocks->find(&node->header);
+        BM_ASSERT(it != freeBlocks->end(), "Free block found in BST but not in the allocation list");
+        freeBlocks->erase(it);
+    }
+
+    ValidateFreeNodesInTreeInternal(freeBlocks, node->left);
+    ValidateFreeNodesInTreeInternal(freeBlocks, node->right);
+}
+
+
+static void ValidateBSTUniquenessInternal(std::unordered_set<free_block *> *set, free_block *node)
+{
+    if (!node)
+    {
+        return;
+    }
+
+    BM_ASSERT(set->find(node) == set->end(), "Duplicate node found in BST");
+    set->insert(node);
+    ValidateBSTUniquenessInternal(set, node->left);
+    ValidateBSTUniquenessInternal(set, node->right);
+}
+
+#endif
+#endif
+
 template <typename memory_interface, size_t max_alignment>
-void free_list_allocator<memory_interface, max_alignment>::ValidateRedBlackProperties()
+void *best_fit_allocator<memory_interface, max_alignment>::GetAllocationPtr(free_block *block)
+{
+    return (void *)((uint8_t *)block + chunk_size);
+}
+
+template <typename memory_interface, size_t max_alignment>
+void *best_fit_allocator<memory_interface, max_alignment>::GetAllocationPtr(block_header *block)
+{
+    return GetAllocationPtr((free_block *)block);
+}
+
+template <typename memory_interface, size_t max_alignment>
+free_block *best_fit_allocator<memory_interface, max_alignment>::GetBlockHeader(void *addr)
+{
+    return (free_block *)((uint8_t *)addr - chunk_size);
+}
+
+inline size_t GetAlignment(void *addr)
+{
+    size_t data = (size_t)addr;
+    return ((data - 1) & ~data) + 1;
+}
+
+template <typename memory_interface, size_t max_alignment>
+void best_fit_allocator<memory_interface, max_alignment>::ValidateBST()
+{
+    if (!root)
+    {
+        return;
+    }
+
+    ValidateBSTInternal(root, 0, SIZE_MAX);
+}
+
+template <typename memory_interface, size_t max_alignment>
+void best_fit_allocator<memory_interface, max_alignment>::ValidateRedBlackProperties()
 {
     BM_ASSERT(root->color == Black, "Root node of a red black tree must be black.");
 
@@ -225,13 +263,13 @@ void ValidateBSTNodeLinksInternal(free_block *node)
 
 
 template <typename memory_interface, size_t max_alignment>
-void free_list_allocator<memory_interface, max_alignment>::ValidateBSTNodeLinks()
+void best_fit_allocator<memory_interface, max_alignment>::ValidateBSTNodeLinks()
 {
     ValidateBSTNodeLinksInternal(root);
 }
 
 template <typename memory_interface, size_t max_alignment>
-void free_list_allocator<memory_interface, max_alignment>::ValidateFreeListSize()
+void best_fit_allocator<memory_interface, max_alignment>::ValidateFreeListSize()
 {
     size_t mem = mem_committed;
 
@@ -256,7 +294,7 @@ void free_list_allocator<memory_interface, max_alignment>::ValidateFreeListSize(
 }
 
 template <typename memory_interface, size_t max_alignment>
-void free_list_allocator<memory_interface, max_alignment>::ValidateFreeListLinks()
+void best_fit_allocator<memory_interface, max_alignment>::ValidateFreeListLinks()
 {
     block_header *prev = nullptr;
     for (block_header *header = first;
@@ -270,7 +308,7 @@ void free_list_allocator<memory_interface, max_alignment>::ValidateFreeListLinks
 }
 
 template <typename memory_interface, size_t max_alignment>
-void free_list_allocator<memory_interface, max_alignment>::ValidateFreeListAllocatorMembers()
+void best_fit_allocator<memory_interface, max_alignment>::ValidateFreeListAllocatorMembers()
 {
 #if NODES_ENABLED
     BM_ASSERT(root == nullptr || root->parent == nullptr, "Root node of internal BST can't have a parent");
@@ -280,7 +318,7 @@ void free_list_allocator<memory_interface, max_alignment>::ValidateFreeListAlloc
 }
 
 template <typename memory_interface, size_t max_alignment>
-void free_list_allocator<memory_interface, max_alignment>::HeaderIntersectsAny(block_header *header)
+void best_fit_allocator<memory_interface, max_alignment>::HeaderIntersectsAny(block_header *header)
 {
     size_t begin = (size_t)header;
     size_t end = begin + sizeof(block_header);
@@ -323,26 +361,9 @@ void ValidateHeaderIntersection(free_block *a, free_block *b)
 
 #ifdef USE_STL
 
-static void ValidateFreeNodesInTreeInternal(std::unordered_set<block_header *> *freeBlocks, free_block *node)
-{
-    if (!node)
-    {
-        return;
-    }
-
-    if (node->header.free)
-    {
-        auto it = freeBlocks->find(&node->header);
-        BM_ASSERT(it != freeBlocks->end(), "Free block found in BST but not in the allocation list");
-        freeBlocks->erase(it);
-    }
-
-    ValidateFreeNodesInTreeInternal(freeBlocks, node->left);
-    ValidateFreeNodesInTreeInternal(freeBlocks, node->right);
-}
 
 template <typename memory_interface, size_t max_alignment>
-void free_list_allocator<memory_interface, max_alignment>::ValidateFreeNodesInTree()
+void best_fit_allocator<memory_interface, max_alignment>::ValidateFreeNodesInTree()
 {
     std::unordered_set<block_header *> freeBlocks;
     for (block_header *current = first;
@@ -360,21 +381,8 @@ void free_list_allocator<memory_interface, max_alignment>::ValidateFreeNodesInTr
     BM_ASSERT(freeBlocks.empty(), "Free blocks found in the allocation list but not in the BST");
 }
 
-static void ValidateBSTUniquenessInternal(std::unordered_set<free_block *> *set, free_block *node)
-{
-    if (!node)
-    {
-        return;
-    }
-
-    BM_ASSERT(set->find(node) == set->end(), "Duplicate node found in BST");
-    set->insert(node);
-    ValidateBSTUniquenessInternal(set, node->left);
-    ValidateBSTUniquenessInternal(set, node->right);
-}
-
 template <typename memory_interface, size_t max_alignment>
-void free_list_allocator<memory_interface, max_alignment>::ValidateBSTUniqueness()
+void best_fit_allocator<memory_interface, max_alignment>::ValidateBSTUniqueness()
 {
     std::unordered_set<free_block *> set;
     ValidateBSTUniquenessInternal(&set, root);
@@ -383,7 +391,7 @@ void free_list_allocator<memory_interface, max_alignment>::ValidateBSTUniqueness
 #endif
 
 template <typename memory_interface, size_t max_alignment>
-void free_list_allocator<memory_interface, max_alignment>::DetectCorruption()
+void best_fit_allocator<memory_interface, max_alignment>::DetectCorruption()
 {
     ValidateFreeListLinks();
     ValidateFreeListSize();
@@ -402,7 +410,7 @@ void free_list_allocator<memory_interface, max_alignment>::DetectCorruption()
 }
 
 template <typename memory_interface, size_t max_alignment>
-free_list_allocator<memory_interface, max_alignment>::free_list_allocator(
+best_fit_allocator<memory_interface, max_alignment>::best_fit_allocator(
     memory_interface *memoryProvider,
     size_t minimumReservation) :
     memory_provider(memoryProvider)
@@ -434,14 +442,14 @@ free_list_allocator<memory_interface, max_alignment>::free_list_allocator(
 }
 
 template<typename memory_interface, size_t max_alignment>
-free_list_allocator<memory_interface, max_alignment>::~free_list_allocator()
+best_fit_allocator<memory_interface, max_alignment>::~best_fit_allocator()
 {
     memory_provider->DeCommit(base, mem_committed);
     memory_provider->Release(base);
 }
 
 template <typename memory_interface, size_t max_alignment>
-bool free_list_allocator<memory_interface, max_alignment>::IsCommitted(void *addr, size_t size)
+bool best_fit_allocator<memory_interface, max_alignment>::IsCommitted(void *addr, size_t size)
 {
     size_t addrEnd = (size_t)addr + size;
     size_t maxCommitted = (size_t)base + mem_committed;
@@ -450,7 +458,7 @@ bool free_list_allocator<memory_interface, max_alignment>::IsCommitted(void *add
 }
 
 template <typename memory_interface, size_t max_alignment>
-void free_list_allocator<memory_interface, max_alignment>::GetCommitParams(void *requestedAddress, size_t requestedSize, void **paramAddress, size_t *paramSize)
+void best_fit_allocator<memory_interface, max_alignment>::GetCommitParams(void *requestedAddress, size_t requestedSize, void **paramAddress, size_t *paramSize)
 {
     uint8_t *commitEnd = (uint8_t *)base + mem_committed;
     size_t difference = commitEnd - (uint8_t *)base;
@@ -462,7 +470,7 @@ void free_list_allocator<memory_interface, max_alignment>::GetCommitParams(void 
 }
 
 template <typename memory_interface, size_t max_alignment>
-bool free_list_allocator<memory_interface, max_alignment>::CanSwapNodes(free_block *nodeOld, free_block *nodeNew)
+bool best_fit_allocator<memory_interface, max_alignment>::CanSwapNodes(free_block *nodeOld, free_block *nodeNew)
 {
     // returns true if nodeNew can be swapped with nodeOld in the red black tree without
     // breaking the BST rules.
@@ -471,7 +479,7 @@ bool free_list_allocator<memory_interface, max_alignment>::CanSwapNodes(free_blo
 }
 
 template <typename memory_interface, size_t max_alignment>
-bool free_list_allocator<memory_interface, max_alignment>::CanChangeNodeSize(free_block *node, size_t newSize)
+bool best_fit_allocator<memory_interface, max_alignment>::CanChangeNodeSize(free_block *node, size_t newSize)
 {
 #if NODES_ENABLED
     if (node->left)
@@ -537,7 +545,7 @@ bool free_list_allocator<memory_interface, max_alignment>::CanChangeNodeSize(fre
 }
 
 template <typename memory_interface, size_t max_alignment>
-void free_list_allocator<memory_interface, max_alignment>::SwapNodes(free_block *nodeOld, free_block *nodeNew)
+void best_fit_allocator<memory_interface, max_alignment>::SwapNodes(free_block *nodeOld, free_block *nodeNew)
 {
 #if NODES_ENABLED
     if (nodeOld->parent)
@@ -570,7 +578,7 @@ void free_list_allocator<memory_interface, max_alignment>::SwapNodes(free_block 
 }
 
 template <typename memory_interface, size_t max_alignment>
-void *free_list_allocator<memory_interface, max_alignment>::AllocInternal(size_t size, uint32_t alignment, int line, const char *file)
+void *best_fit_allocator<memory_interface, max_alignment>::AllocInternal(size_t size, uint32_t alignment, int line, const char *file)
 {
     (void)line;
     (void)file;
@@ -723,7 +731,7 @@ void *free_list_allocator<memory_interface, max_alignment>::AllocInternal(size_t
 }
 
 template <typename memory_interface, size_t max_alignment>
-void *free_list_allocator<memory_interface, max_alignment>::ReAllocInternal(void *addr, size_t size, int line, const char *file)
+void *best_fit_allocator<memory_interface, max_alignment>::ReAllocInternal(void *addr, size_t size, int line, const char *file)
 {
     (void)line;
     (void)file;
@@ -819,7 +827,7 @@ void *free_list_allocator<memory_interface, max_alignment>::ReAllocInternal(void
 }
 
 template <typename memory_interface, size_t max_alignment>
-void free_list_allocator<memory_interface, max_alignment>::FreeInternal(void *addr, int line, const char *file)
+void best_fit_allocator<memory_interface, max_alignment>::FreeInternal(void *addr, int line, const char *file)
 {
     (void)line;
     (void)file;
@@ -942,7 +950,7 @@ void free_list_allocator<memory_interface, max_alignment>::FreeInternal(void *ad
 }
 
 template <typename memory_interface, size_t max_alignment>
-free_block *free_list_allocator<memory_interface, max_alignment>::FindBestFit(size_t size)
+free_block *best_fit_allocator<memory_interface, max_alignment>::FindBestFit(size_t size)
 {
     #if NODES_ENABLED
     free_block *current = root;
@@ -991,7 +999,7 @@ free_block *free_list_allocator<memory_interface, max_alignment>::FindBestFit(si
 }
 
 template <typename memory_interface, size_t max_alignment>
-void free_list_allocator<memory_interface, max_alignment>::LeftRotate(free_block *node)
+void best_fit_allocator<memory_interface, max_alignment>::LeftRotate(free_block *node)
 {
     free_block *rotator = node->right;
     node->right = rotator->left;
@@ -1015,7 +1023,7 @@ void free_list_allocator<memory_interface, max_alignment>::LeftRotate(free_block
 }
 
 template <typename memory_interface, size_t max_alignment>
-void free_list_allocator<memory_interface, max_alignment>::RightRotate(free_block *node)
+void best_fit_allocator<memory_interface, max_alignment>::RightRotate(free_block *node)
 {
     free_block *rotator = node->left;
     node->left = rotator->right;
@@ -1038,7 +1046,7 @@ void free_list_allocator<memory_interface, max_alignment>::RightRotate(free_bloc
 }
 
 template <typename memory_interface, size_t max_alignment>
-void free_list_allocator<memory_interface, max_alignment>::AddNode(free_block *block)
+void best_fit_allocator<memory_interface, max_alignment>::AddNode(free_block *block)
 {
 #if NODES_ENABLED
     // Add the node
@@ -1155,7 +1163,7 @@ void free_list_allocator<memory_interface, max_alignment>::AddNode(free_block *b
 }
 
 template <typename memory_interface, size_t max_alignment>
-void free_list_allocator<memory_interface, max_alignment>::RemoveNode(free_block *block)
+void best_fit_allocator<memory_interface, max_alignment>::RemoveNode(free_block *block)
 {
 #if NODES_ENABLED
 
@@ -1165,7 +1173,8 @@ void free_list_allocator<memory_interface, max_alignment>::RemoveNode(free_block
     free_block *dbSibling = nullptr;
     bool dbIsLeft;
     bool toReplaceWasLeaf = false;
-    
+
+    // Perform the standard BST removal
     free_block *toReplace;
     if (block->left && block->right)
     {
@@ -1296,7 +1305,7 @@ void free_list_allocator<memory_interface, max_alignment>::RemoveNode(free_block
         {
             isLeft = dbParent->left == doubleBlack;
         }
-        
+       
         free_block *sibling = isLeft ? dbParent->right : dbParent->left;
 
         if (!sibling ||

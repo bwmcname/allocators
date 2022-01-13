@@ -73,9 +73,9 @@ void MyAssert(bool value, const char *message, int line, const char *file)
 #include "mallocator.h"
 #undef BM_MALLOCATOR_IMPLEMENTATION
 
-#define BM_FREE_LIST_ALLOCATOR_IMPLEMENTATION
-#include "free_list_allocator.h"
-#undef BM_FREE_LIST_ALLOCATOR_IMPLEMENTATION
+#define BM_BEST_FIT_ALLOCATOR_IMPLEMENTATION
+#include "best_fit_allocator.h"
+#undef BM_BEST_FIT_ALLOCATOR_IMPLEMENTATION
 
 void CheckForLeaks(alloc_block *block)
 {
@@ -215,7 +215,7 @@ void SlowRandomAllocTests(allocator_t *allocator)
     std::unordered_map<void *, char *> allocatedStrings;
 
     uint64_t begin = __rdtsc();
-    int actionCount = 10000;
+    int actionCount = 100000;
     for (int i = 0; i < actionCount; ++i)
     {        
         int val = rand() % 10;
@@ -294,7 +294,7 @@ int main()
     win32_virtual_memory_interface mem;
     // MemoryInterfaceTests(&mem);
     
-    free_list_allocator<win32_virtual_memory_interface> allocator(&mem, Gigabytes(2));
+    best_fit_allocator<win32_virtual_memory_interface> allocator(&mem, Gigabytes(2));
     SlowRandomAllocTests(&allocator);
 
     // FixedAllocatorTests(&allocator);
