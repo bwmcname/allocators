@@ -215,7 +215,7 @@ void SlowRandomAllocTests(allocator_t *allocator)
     std::unordered_map<void *, char *> allocatedStrings;
 
     uint64_t begin = __rdtsc();
-    int actionCount = 1000000;
+    int actionCount = 10000;
     for (int i = 0; i < actionCount; ++i)
     {        
         int val = rand() % 10;
