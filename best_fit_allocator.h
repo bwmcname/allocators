@@ -115,7 +115,7 @@ struct best_fit_allocator
 #endif
 
 #ifdef BM_BEST_FIT_ALLOCATOR_IMPLEMENTATION
-static void ValidateBSTInternal(free_block *block, size_t min, size_t max)
+void ValidateBSTInternal(free_block *block, size_t min, size_t max)
 {
     // BM_ASSERT(block->header.free, "Non-free block in BST");
 
@@ -140,7 +140,7 @@ static void ValidateBSTInternal(free_block *block, size_t min, size_t max)
     }
 }
 
-static int ValidateRedBlackNodeInternal(free_block *node)
+int ValidateRedBlackNodeInternal(free_block *node)
 {
     if (node == nullptr)
     {
@@ -169,7 +169,7 @@ static int ValidateRedBlackNodeInternal(free_block *node)
 
 #ifdef USE_STL
 
-static void ValidateFreeNodesInTreeInternal(std::unordered_set<block_header *> *freeBlocks, free_block *node)
+void ValidateFreeNodesInTreeInternal(std::unordered_set<block_header *> *freeBlocks, free_block *node)
 {
     if (!node)
     {
@@ -188,7 +188,7 @@ static void ValidateFreeNodesInTreeInternal(std::unordered_set<block_header *> *
 }
 
 
-static void ValidateBSTUniquenessInternal(std::unordered_set<free_block *> *set, free_block *node)
+void ValidateBSTUniquenessInternal(std::unordered_set<free_block *> *set, free_block *node)
 {
     if (!node)
     {
