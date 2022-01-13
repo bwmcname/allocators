@@ -11,6 +11,10 @@
 
 #define NODES_ENABLED 1
 
+#ifdef _MSC_VER
+#define BM_RESTRICT __restrict
+#endif
+
 struct block_header
 {
     block_header *prev;
@@ -70,6 +74,22 @@ struct best_fit_allocator
 
     ~best_fit_allocator();
 
+    DECLARE_ALLOCATOR_INTERFACE_METHODS();
+    
+    // Corruption detection.
+    void DetectCorruption();
+    void ValidateBST();
+    void ValidateFreeListSize();
+    void ValidateFreeListLinks();
+    void ValidateBSTNodeLinks();
+    void ValidateFreeListAllocatorMembers();
+    void ValidateRedBlackProperties();
+#ifdef USE_STL
+    void ValidateFreeNodesInTree();
+    void ValidateBSTUniqueness();
+#endif
+
+private:
     memory_interface *memory_provider;
 
     void *base;
@@ -80,7 +100,6 @@ struct best_fit_allocator
     block_header *last;
     free_block *root;
 
-    DECLARE_ALLOCATOR_INTERFACE_METHODS();
     bool IsCommitted(void *addr, size_t size);
     void GetCommitParams(void *requestedAddress, size_t requestedSize, void **paramAddress, size_t *paramSize);
     free_block *FindBestFit(size_t size);
@@ -94,19 +113,6 @@ struct best_fit_allocator
     bool CanChangeNodeSize(free_block *node, size_t newSize);
     void LeftRotate(free_block *node);
     void RightRotate(free_block *node);
-
-    // Corruption detection.
-    void DetectCorruption();
-    void ValidateBST();
-    void ValidateFreeListSize();
-    void ValidateFreeListLinks();
-    void ValidateBSTNodeLinks();
-    void ValidateFreeListAllocatorMembers();
-    void ValidateRedBlackProperties();
-#ifdef USE_STL
-    void ValidateFreeNodesInTree();
-    void ValidateBSTUniqueness();
-#endif
     void HeaderIntersectsAny(block_header *header);
 };
 
