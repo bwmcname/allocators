@@ -206,7 +206,7 @@ template <typename allocator_t>
 void SlowRandomAllocTests(allocator_t *allocator)
 {
     unsigned seed = (unsigned)__rdtsc();
-    // unsigned seed = 4189497035;
+    // unsigned seed = 535998250;
     printf("Seed: %u\n", seed);
     srand(seed);
     printf("SlowRandomAllocTest\n");
