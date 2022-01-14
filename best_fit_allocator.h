@@ -75,9 +75,27 @@ struct best_fit_allocator
 private:
     struct block_header
     {
-        block_header *prev;
         block_header *next;
-        bool free;
+
+        bool GetFree()
+        {
+            return (size_t)prev & 1llu;
+        }
+
+        void SetFree(bool free)
+        {
+            prev = (block_header *)(((size_t)prev & ~1llu) | (size_t)free);
+        }
+
+        block_header *GetPrev()
+        {
+            return (block_header *)((size_t)prev & ~1llu);
+        }
+
+        void SetPrev(block_header *newPrev)
+        {
+            prev = (block_header *)((size_t)newPrev | ((size_t)prev & 1llu));
+        }
 
         size_t GetSize(best_fit_allocator<MI, MA> *owner)
         {
@@ -93,6 +111,9 @@ private:
 
             return end - ((size_t)this + owner->chunk_size);
         }
+
+    private:
+        block_header *prev;
     };
 
     using rb_color = bool;
@@ -253,7 +274,7 @@ void best_fit_allocator<MI, MA>::ValidateFreeNodesInTreeInternal(std::unordered_
         return;
     }
 
-    if (node->header.free)
+    if (node->header.GetFree())
     {
         auto it = freeBlocks->find(&node->header);
         BM_ASSERT(it != freeBlocks->end(), "Free block found in BST but not in the allocation list");
@@ -366,7 +387,7 @@ void best_fit_allocator<MI, MA>::ValidateFreeListLinks()
          header != nullptr;
          header = header->next)
     {
-        BM_ASSERT(prev == header->prev, "Internal allocation list links broken");
+        BM_ASSERT(prev == header->GetPrev(), "Internal allocation list links broken");
         
         prev = header;
     }
@@ -379,7 +400,7 @@ void best_fit_allocator<MI, MA>::ValidateFreeListAllocatorMembers()
     BM_ASSERT(root == nullptr || root->GetParent() == nullptr, "Root node of internal BST can't have a parent");
 #endif
     BM_ASSERT(last == nullptr || last->next == nullptr, "Last node in list has a non-null next pointer");
-    BM_ASSERT(first == nullptr || first->prev == nullptr, "First node in list has a non-null prev pointer");
+    BM_ASSERT(first == nullptr || first->GetPrev() == nullptr, "First node in list has a non-null prev pointer");
 }
 
 template <typename MI, size_t MA>
@@ -417,7 +438,7 @@ void best_fit_allocator<MI, MA>::ValidateFreeNodesInTree()
          current;
          current = current->next)
     {
-        if (current->free)
+        if (current->GetFree())
         {
             freeBlocks.insert(current);
         }
@@ -475,9 +496,9 @@ best_fit_allocator<MI, MA>::best_fit_allocator(
 
     // Initialize the first block.
     root = (free_block *)base;
-    root->header.prev = nullptr;
+    root->header.SetPrev(nullptr);
     root->header.next = nullptr;
-    root->header.free = true;
+    root->header.SetFree(true);
     root->left = nullptr;
     root->right = nullptr;
     root->SetParent(nullptr);
@@ -631,7 +652,11 @@ void *best_fit_allocator<MI, MA>::AllocInternal(size_t size, uint32_t alignment,
     BM_ASSERT(alignment <= MA, "Tried to allocate with an alignment greater than the maximum supported alignment");
     BM_ASSERT(size > 0, "Tried to allocate 0 bytes.");
 
-    size = SnapUpToIncrement(size, chunk_size);
+    // Make sure the requested size is in chunk_size incremements
+    // Also make sure the requested size it atleast as large as free_block_overhead
+    // If we allocate less than that, then we risk overwriting members from the next block.
+    size_t sizeToChunks = SnapUpToIncrement(size, chunk_size);
+    size = sizeToChunks > free_block_overhead ? sizeToChunks : free_block_overhead;
 
     // find the smallest chunk that can fit this allocation.
     free_block *bestFit = FindBestFit(size);
@@ -642,7 +667,7 @@ void *best_fit_allocator<MI, MA>::AllocInternal(size_t size, uint32_t alignment,
         
         uint8_t *unCommitted = (uint8_t *)base + mem_committed;
 
-        if (last->free)
+        if (last->GetFree())
         {
             free_block *lastFree = (free_block *)last;
             size_t requiredSize = size - last->GetSize(this);
@@ -678,8 +703,8 @@ void *best_fit_allocator<MI, MA>::AllocInternal(size_t size, uint32_t alignment,
             mem_committed += actualCommit;
 
             free_block *newBlock = (free_block *)unCommitted;
-            newBlock->header.free = true;
-            newBlock->header.prev = last;
+            newBlock->header.SetFree(true);
+            newBlock->header.SetPrev(last);
             newBlock->header.next = nullptr;
             last->next = &newBlock->header;
             last = &newBlock->header;
@@ -693,7 +718,7 @@ void *best_fit_allocator<MI, MA>::AllocInternal(size_t size, uint32_t alignment,
     void *allocation = GetAllocationPtr(&bestFit->header);
 
     // Mark this block as used.
-    bestFit->header.free = false;
+    bestFit->header.SetFree(false);
 
     size_t leftover = bestFit->header.GetSize(this) - size;
 
@@ -704,14 +729,14 @@ void *best_fit_allocator<MI, MA>::AllocInternal(size_t size, uint32_t alignment,
         // add a new node to the tree and a new header to the list for the leftover memory        
         free_block *newBlock = (free_block *)((uint8_t *)allocation + size);
 
-        newBlock->header.free = true;
-        newBlock->header.prev = &bestFit->header;
-        if (bestFit->header.next && bestFit->header.next->free)
+        newBlock->header.SetFree(true);
+        newBlock->header.SetPrev(&bestFit->header);
+        if (bestFit->header.next && bestFit->header.next->GetFree())
         {
             // coalesce the two blocks
             free_block *toCombine = (free_block *)bestFit->header.next;
             newBlock->header.next = toCombine->header.next;
-            if (toCombine->header.next) toCombine->header.next->prev = (block_header *)newBlock;
+            if (toCombine->header.next) toCombine->header.next->SetPrev((block_header *)newBlock);
 
             // Try swapping in the new node with the old coalesced blocks node
             if (!CanSwapNodes(toCombine, newBlock))
@@ -738,17 +763,20 @@ void *best_fit_allocator<MI, MA>::AllocInternal(size_t size, uint32_t alignment,
         }
         else
         {
-            if (bestFit->header.next) bestFit->header.next->prev = (block_header *)newBlock;
-            newBlock->header.next = bestFit->header.next;
-            if (CanSwapNodes(bestFit, newBlock))
+            size_t newSize = leftover - chunk_size;
+            if (CanChangeNodeSize(bestFit, newSize))
             {
                 SwapNodes(bestFit, newBlock);
+                newBlock->header.next = bestFit->header.next;
             }
             else
             {
                 RemoveNode(bestFit);
+                newBlock->header.next = bestFit->header.next;
                 AddNode(newBlock);
             }
+
+            if (bestFit->header.next) bestFit->header.next->SetPrev((block_header *)newBlock);
         }
 
         bestFit->header.next = (block_header *)newBlock;
@@ -786,7 +814,7 @@ void *best_fit_allocator<MI, MA>::ReAllocInternal(void *addr, size_t size, int l
     int needed = 0;
     for (;;)
     {
-        if (current == nullptr || !current->free)
+        if (current == nullptr || !current->GetFree())
         {
             return nullptr;
         }
@@ -815,11 +843,11 @@ void *best_fit_allocator<MI, MA>::ReAllocInternal(void *addr, size_t size, int l
 
                 free_block *newBlock = (free_block *)((uint8_t *)current + required);
                 
-                newBlock->header.free = true;
-                newBlock->header.prev = header;
+                newBlock->header.SetFree(true);
+                newBlock->header.SetPrev(header);
                 newBlock->header.next = current->next;
                 header->next = &newBlock->header;
-                if (current->next) current->next->prev = &newBlock->header;
+                if (current->next) current->next->SetPrev(&newBlock->header);
 
                 if (newBlock->header.next == nullptr)
                 {
@@ -832,7 +860,7 @@ void *best_fit_allocator<MI, MA>::ReAllocInternal(void *addr, size_t size, int l
             {
                 // nothing to add.
                 header->next = current->next;
-                if (current->next) current->next->prev = header;
+                if (current->next) current->next->SetPrev(header);
 
                 if (current == last)
                 {
@@ -856,15 +884,15 @@ void best_fit_allocator<MI, MA>::FreeInternal(void *addr, int line, const char *
     (void)line;
     (void)file;
     block_header *header = (block_header *)((uint8_t *)addr - chunk_size);
-    BM_ASSERT(!header->free, "Trying to free an already free block.");
-    header->free = true;
+    BM_ASSERT(!header->GetFree(), "Trying to free an already free block.");
+    header->SetFree(true);
 
-    if (header->prev && header->prev->free)
+    if (header->GetPrev() && header->GetPrev()->GetFree())
     {
-        if (header->next && header->next->free)
+        if (header->next && header->next->GetFree())
         {
             // Coalesce all 3 blocks.
-            block_header *prevHeader = header->prev;
+            block_header *prevHeader = header->GetPrev();
             block_header *nextHeader = header->next;
 
             free_block *prevBlock = (free_block *)prevHeader;
@@ -897,7 +925,7 @@ void best_fit_allocator<MI, MA>::FreeInternal(void *addr, int line, const char *
                 }
             }
 
-            if (nextHeader->next) nextHeader->next->prev = prevHeader;
+            if (nextHeader->next) nextHeader->next->SetPrev(prevHeader);
 
             if (prevHeader->next == nullptr)
             {
@@ -910,7 +938,7 @@ void best_fit_allocator<MI, MA>::FreeInternal(void *addr, int line, const char *
         else
         {
             // Coalesce the two blocks
-            block_header *prevHeader = header->prev;
+            block_header *prevHeader = header->GetPrev();
             free_block *prevBlock = (free_block *)prevHeader;
 
             // try to update the current nodes size without having to re-insert into the tree.
@@ -926,7 +954,7 @@ void best_fit_allocator<MI, MA>::FreeInternal(void *addr, int line, const char *
                 prevHeader->next = header->next;
             }
 
-            if (header->next) header->next->prev = prevHeader;
+            if (header->next) header->next->SetPrev(prevHeader);
 
             if (prevHeader->next == nullptr)
             {
@@ -935,7 +963,7 @@ void best_fit_allocator<MI, MA>::FreeInternal(void *addr, int line, const char *
             }
         }
     }
-    else if (header->next && header->next->free)
+    else if (header->next && header->next->GetFree())
     {
         // Coalesce the two blocks
         free_block *block = (free_block *)header;
@@ -947,16 +975,16 @@ void best_fit_allocator<MI, MA>::FreeInternal(void *addr, int line, const char *
         if (CanChangeNodeSize(nextBlock, newSize))
         {
             header->next = nextHeader->next;
+            if (nextHeader->next) nextHeader->next->SetPrev(header);
             SwapNodes(nextBlock, block);
         }
         else
         {
             RemoveNode(nextBlock);
             header->next = nextHeader->next;
+            if (nextHeader->next) nextHeader->next->SetPrev(header);
             AddNode(block);
         }
-
-        if (nextHeader->next) nextHeader->next->prev = header;
 
         if (header->next == nullptr)
         {

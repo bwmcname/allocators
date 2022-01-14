@@ -15,7 +15,7 @@
 #include <unordered_set>
 #pragma warning(pop)
 
-#define CORRUPTION_DETECTION_ENABLED 0
+#define CORRUPTION_DETECTION_ENABLED 1
 
 FILE *testLog = nullptr;
 void MyAssert(bool value, const char *message, int line, const char *file)
@@ -205,8 +205,8 @@ void PrintAlignment(void *addr)
 template <typename allocator_t>
 void SlowRandomAllocTests(allocator_t *allocator)
 {
-    unsigned seed = (unsigned)__rdtsc();
-    // unsigned seed = 535998250;
+    // unsigned seed = (unsigned)__rdtsc();
+    unsigned seed = 3283316669;
     printf("Seed: %u\n", seed);
     srand(seed);
     printf("SlowRandomAllocTest\n");
