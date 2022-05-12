@@ -15,7 +15,7 @@
 #include <unordered_set>
 #pragma warning(pop)
 
-#define CORRUPTION_DETECTION_ENABLED 1
+#define CORRUPTION_DETECTION_ENABLED 0
 
 FILE *testLog = nullptr;
 void MyAssert(bool value, const char *message, int line, const char *file)
@@ -206,7 +206,7 @@ template <typename allocator_t>
 void SlowRandomAllocTests(allocator_t *allocator)
 {
     // unsigned seed = (unsigned)__rdtsc();
-    unsigned seed = 3283316669;
+    unsigned seed = 0xDEADBEEF;
     printf("Seed: %u\n", seed);
     srand(seed);
     printf("SlowRandomAllocTest\n");
@@ -214,12 +214,16 @@ void SlowRandomAllocTests(allocator_t *allocator)
     std::map<void *, size_t> allocations;
     std::unordered_map<void *, char *> allocatedStrings;
 
+    uint64_t maxTimedOp = 0;
+    int timedOpIndex = -1;
+
     uint64_t begin = __rdtsc();
-    int actionCount = 10000;
+    int actionCount = 4;
     for (int i = 0; i < actionCount; ++i)
     {        
         int val = rand() % 10;
 
+        uint64_t timedOpBegin = __rdtsc();
         if (val < 6)
         {
             size_t size = (rand() % Megabytes(512)) + 1; // atleast one byte
@@ -243,11 +247,16 @@ void SlowRandomAllocTests(allocator_t *allocator)
             size_t oldSize = it->second;
             size_t newSize = it->second + (rand() % Megabytes(10));
             void *ptr = allocator->REALLOC(it->first, newSize);
+            (void)ptr;
+            (void)oldSize;
+
+#if CORRUPTION_DETECTION_ENABLED
             if (ptr)
             {
                 it->second = newSize;
                 memset((uint8_t *)ptr + oldSize, 0xFA, newSize - oldSize);
             }
+#endif
         }
         else
         {
@@ -262,16 +271,25 @@ void SlowRandomAllocTests(allocator_t *allocator)
             auto it = allocations.begin();
             std::advance(it, element);
 
+#if CORRUPTION_DETECTION_ENABLED
             size_t size = allocations[it->first];
             uint8_t *allocation = (uint8_t *)it->first;
-            
+
             for (size_t byte = 0; byte < size; ++byte)
             {
                 BM_ASSERT(allocation[byte] == 0xFA, "Contents of allocation altered");
             }
+#endif
                         
             allocator->FREE(it->first);
             allocations.erase(it);
+        }
+
+        uint64_t timedOpElapsed = __rdtsc() - timedOpBegin;
+        if (timedOpElapsed > maxTimedOp)
+        {
+            maxTimedOp = timedOpElapsed;
+            timedOpIndex = i;
         }
 
 #if CORRUPTION_DETECTION_ENABLED 
@@ -281,6 +299,7 @@ void SlowRandomAllocTests(allocator_t *allocator)
 
     uint64_t total = __rdtsc() - begin;
     printf("SUCCESS [Elapsed=%llu]\n", total);
+    printf("Max Op [Elapsed=%llu, Index=%i]\n", maxTimedOp, timedOpIndex);
 }
 
 int main()

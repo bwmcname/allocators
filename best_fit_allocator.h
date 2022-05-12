@@ -9,8 +9,6 @@
 #endif
 #pragma warning(pop)
 
-#define NODES_ENABLED 1
-
 #ifdef _MSC_VER
 #define BM_RESTRICT __restrict
 #endif
@@ -173,9 +171,6 @@ private:
     free_block *GetBlockHeader(void *addr);
     void RemoveNode(free_block *block);
     void AddNode(free_block *block);
-    bool CanSwapNodes(free_block *nodeOld, free_block *nodeNew);
-    void SwapNodes(free_block *nodeOld, free_block *nodeNew);
-    bool CanChangeNodeSize(free_block *node, size_t newSize);
     void LeftRotate(free_block *node);
     void RightRotate(free_block *node);
     void HeaderIntersectsAny(block_header *header);
@@ -396,9 +391,7 @@ void best_fit_allocator<MI, MA>::ValidateFreeListLinks()
 template <typename MI, size_t MA>
 void best_fit_allocator<MI, MA>::ValidateFreeListAllocatorMembers()
 {
-#if NODES_ENABLED
     BM_ASSERT(root == nullptr || root->GetParent() == nullptr, "Root node of internal BST can't have a parent");
-#endif
     BM_ASSERT(last == nullptr || last->next == nullptr, "Last node in list has a non-null next pointer");
     BM_ASSERT(first == nullptr || first->GetPrev() == nullptr, "First node in list has a non-null prev pointer");
 }
@@ -464,8 +457,6 @@ void best_fit_allocator<MI, MA>::DetectCorruption()
     ValidateFreeListLinks();
     ValidateFreeListSize();
     ValidateFreeListAllocatorMembers();
-
-#if NODES_ENABLED
     ValidateBSTNodeLinks();
     ValidateBST();
     ValidateRedBlackProperties();
@@ -473,7 +464,6 @@ void best_fit_allocator<MI, MA>::DetectCorruption()
 #ifdef USE_STL
     ValidateFreeNodesInTree();
     ValidateBSTUniqueness();
-#endif
 #endif
 }
 
@@ -535,115 +525,7 @@ void best_fit_allocator<MI, MA>::GetCommitParams(void *requestedAddress, size_t 
     *paramAddress = (void *)commitEnd;
     *paramSize = unCommitted;
 }
-
-template <typename MI, size_t MA>
-bool best_fit_allocator<MI, MA>::CanSwapNodes(free_block *nodeOld, free_block *nodeNew)
-{
-    // returns true if nodeNew can be swapped with nodeOld in the red black tree without
-    // breaking the BST rules.
-    
-    return CanChangeNodeSize(nodeOld, nodeNew->header.GetSize(this));
-}
-
-template <typename MI, size_t MA>
-bool best_fit_allocator<MI, MA>::CanChangeNodeSize(free_block *node, size_t newSize)
-{
-#if NODES_ENABLED
-    if (node->left)
-    {
-        return false;
-    }
-
-    if (node->right)
-    {
-        return false;
-    }
-    
-    if (node->GetParent())
-    {
-        free_block *parent = node->GetParent();
-        
-        if (parent->left == node) // left node
-        {
-            if (newSize > parent->header.GetSize(this))
-            {
-                return false;
-            }
-
-            if (parent->GetParent())
-            {
-                if (parent->GetParent()->left == parent)
-                {
-                    return newSize > parent->GetParent()->header.GetSize(this);
-                }
-                else
-                {
-                    return false;
-                }
-            }
-        }
-        else // right node
-        {
-            if (newSize <= parent->header.GetSize(this))
-            {
-                return false;
-            }
-
-            if (parent->GetParent())
-            {
-                if (parent->GetParent()->right == parent)
-                {
-                    return newSize < parent->GetParent()->header.GetSize(this);
-                }
-                else
-                {
-                    return false;
-                }
-            }
-        }
-    }
-
-    return true;
-#else
-    (void)node;
-    (void)newSize;
-    return false;
-#endif
-}
-
-template <typename MI, size_t MA>
-void best_fit_allocator<MI, MA>::SwapNodes(free_block *nodeOld, free_block *nodeNew)
-{
-#if NODES_ENABLED
-    if (nodeOld->GetParent())
-    {
-        bool isLeft = nodeOld->GetParent()->left == nodeOld;
-        if (isLeft)
-        {
-            nodeOld->GetParent()->left = nodeNew;
-        }
-        else
-        {
-            nodeOld->GetParent()->right = nodeNew;
-        }
-    }
-
-    if (root == nodeOld)
-    {
-        root = nodeNew;
-    }
-
-    nodeNew->SetParent(nodeOld->GetParent());
-    nodeNew->left = nodeOld->left;
-    nodeNew->right = nodeOld->right;
-    nodeNew->SetColor(nodeOld->GetColor());
-#else
-    (void)nodeOld;
-    (void)nodeNew;
-    BM_ASSERT(false, "");
-#endif
-}
-
+ 
 template <typename MI, size_t MA>
 void *best_fit_allocator<MI, MA>::AllocInternal(size_t size, uint32_t alignment, int line, const char *file)
 {
@@ -680,11 +562,8 @@ void *best_fit_allocator<MI, MA>::AllocInternal(size_t size, uint32_t alignment,
             memory_provider->Commit(unCommitted, requiredSize, &actualCommit);
 
             mem_committed += actualCommit;
-            if (!CanChangeNodeSize(lastFree, last->GetSize(this)))
-            {
-                RemoveNode(lastFree);
-                AddNode(lastFree);
-            }
+            RemoveNode(lastFree);
+            AddNode(lastFree);
 
             // Must do this after checking if we can change the node size.
             // the node size of the last item in the list is dependant on mem_committed.
@@ -738,43 +617,15 @@ void *best_fit_allocator<MI, MA>::AllocInternal(size_t size, uint32_t alignment,
             newBlock->header.next = toCombine->header.next;
             if (toCombine->header.next) toCombine->header.next->SetPrev((block_header *)newBlock);
 
-            // Try swapping in the new node with the old coalesced blocks node
-            if (!CanSwapNodes(toCombine, newBlock))
-            {
-                RemoveNode(toCombine);
-
-                // now try swapping with the node that we just allocated from.
-                if (!CanSwapNodes(bestFit, newBlock))
-                {
-                    // Nothing could be swapped :(
-                    RemoveNode(bestFit);
-                    AddNode(newBlock);
-                }
-                else
-                {
-                    SwapNodes(bestFit, newBlock);
-                }
-            }
-            else
-            {
-                SwapNodes(toCombine, newBlock);
-                RemoveNode(bestFit);
-            }
+            RemoveNode(toCombine);
+            RemoveNode(bestFit);
+            AddNode(newBlock);
         }
         else
         {
-            size_t newSize = leftover - chunk_size;
-            if (CanChangeNodeSize(bestFit, newSize))
-            {
-                SwapNodes(bestFit, newBlock);
-                newBlock->header.next = bestFit->header.next;
-            }
-            else
-            {
-                RemoveNode(bestFit);
-                newBlock->header.next = bestFit->header.next;
-                AddNode(newBlock);
-            }
+            RemoveNode(bestFit);
+            newBlock->header.next = bestFit->header.next;
+            AddNode(newBlock);
 
             if (bestFit->header.next) bestFit->header.next->SetPrev((block_header *)newBlock);
         }
@@ -898,32 +749,11 @@ void best_fit_allocator<MI, MA>::FreeInternal(void *addr, int line, const char *
             free_block *prevBlock = (free_block *)prevHeader;
             free_block *nextBlock = (free_block *)nextHeader;
 
-            // Reclaiming two chunks from the header and the nextHeader.
-            size_t newSize = prevHeader->GetSize(this) + header->GetSize(this) + nextHeader->GetSize(this) + (2 * chunk_size);
-            if (CanChangeNodeSize(prevBlock, newSize))
-            {
-                // Update node in place if possible, and remove nextBlock from the tree.
-                prevHeader->next = nextHeader->next;
-                RemoveNode(nextBlock);
-            }
-            else
-            {
-                // Couldn't update prevBlock in place. Remove it from the tree.
-                RemoveNode(prevBlock);
-                prevHeader->next = nextHeader->next;
+            RemoveNode(prevBlock);
+            prevHeader->next = nextHeader->next;
 
-                // nextBlock can be removed from the tree, so try to swap it with the block that we just added.
-                if (CanChangeNodeSize(nextBlock, newSize))
-                {
-                    SwapNodes(nextBlock, prevBlock);
-                }
-                else
-                {
-                    // Could not swap with the nextBlock.
-                    RemoveNode(nextBlock);
-                    AddNode(prevBlock);
-                }
-            }
+            RemoveNode(nextBlock);
+            AddNode(prevBlock);
 
             if (nextHeader->next) nextHeader->next->SetPrev(prevHeader);
 
@@ -941,18 +771,9 @@ void best_fit_allocator<MI, MA>::FreeInternal(void *addr, int line, const char *
             block_header *prevHeader = header->GetPrev();
             free_block *prevBlock = (free_block *)prevHeader;
 
-            // try to update the current nodes size without having to re-insert into the tree.
-            size_t newSize = prevHeader->GetSize(this) + header->GetSize(this) + chunk_size;
-            if (!CanChangeNodeSize(prevBlock, newSize))
-            {
-                RemoveNode(prevBlock);
-                prevHeader->next = header->next;
-                AddNode(prevBlock);
-            }
-            else
-            {
-                prevHeader->next = header->next;
-            }
+            RemoveNode(prevBlock);
+            prevHeader->next = header->next;
+            AddNode(prevBlock);
 
             if (header->next) header->next->SetPrev(prevHeader);
 
@@ -970,21 +791,10 @@ void best_fit_allocator<MI, MA>::FreeInternal(void *addr, int line, const char *
         block_header *nextHeader = header->next;
         free_block *nextBlock = (free_block *)nextHeader;
 
-        // try to swap nodes in the tree with nextBlock to avoid re-inserting into the tree.
-        size_t newSize = nextHeader->GetSize(this) + header->GetSize(this) + chunk_size;
-        if (CanChangeNodeSize(nextBlock, newSize))
-        {
-            header->next = nextHeader->next;
-            if (nextHeader->next) nextHeader->next->SetPrev(header);
-            SwapNodes(nextBlock, block);
-        }
-        else
-        {
-            RemoveNode(nextBlock);
-            header->next = nextHeader->next;
-            if (nextHeader->next) nextHeader->next->SetPrev(header);
-            AddNode(block);
-        }
+        RemoveNode(nextBlock);
+        header->next = nextHeader->next;
+        if (nextHeader->next) nextHeader->next->SetPrev(header);
+        AddNode(block);
 
         if (header->next == nullptr)
         {
@@ -1002,7 +812,6 @@ void best_fit_allocator<MI, MA>::FreeInternal(void *addr, int line, const char *
 template <typename MI, size_t MA>
 typename best_fit_allocator<MI, MA>::free_block *best_fit_allocator<MI, MA>::FindBestFit(size_t size)
 {
-    #if NODES_ENABLED
     free_block *current = root;
     free_block *lastValid = nullptr;
     for (;;)
@@ -1022,30 +831,6 @@ typename best_fit_allocator<MI, MA>::free_block *best_fit_allocator<MI, MA>::Fin
             current = current->left;
         }
     }
-    #else
-    block_header *lowest = nullptr;
-    for (block_header *current = first;
-         current;
-         current = current->next)
-    {
-        if (size <= current->size)
-        {
-            if (lowest)
-            {
-                if (current->size < lowest->size)
-                {
-                    lowest = current;
-                }
-            }
-            else
-            {
-                lowest = current;
-            }
-        }
-    }
-
-    return (free_block *)lowest;
-    #endif
 }
 
 template <typename MI, size_t MA>
@@ -1098,7 +883,6 @@ void best_fit_allocator<MI, MA>::RightRotate(free_block *node)
 template <typename MI, size_t MA>
 void best_fit_allocator<MI, MA>::AddNode(free_block *block)
 {
-#if NODES_ENABLED
     // Add the node
     block->left = nullptr;
     block->right = nullptr;
@@ -1141,22 +925,24 @@ void best_fit_allocator<MI, MA>::AddNode(free_block *block)
     // Do rb tree balance operations
     block->SetColor(Red);
     current = block;
-    while (current && current->GetParent() && current->GetParent()->GetColor() == Red)
+    free_block *parent = current->GetParent();
+    while (current && parent && parent->GetColor() == Red)
     {
         BM_ASSERT(current->GetColor() == Red, "Expected Red Node");
 
         free_block *uncle;
         bool parentIsLeft;
-        if (current->GetParent()->GetParent())
+        free_block *grandparent = parent->GetParent();
+        if (grandparent)
         {
-            parentIsLeft = current->GetParent()->GetParent()->left == current->GetParent();
+            parentIsLeft = grandparent->left == parent;
             if (parentIsLeft)
             {
-                uncle = current->GetParent()->GetParent()->right;
+                uncle = grandparent->right;
             }
             else
             {
-                uncle = current->GetParent()->GetParent()->left;
+                uncle = grandparent->left;
             }
         }
         else
@@ -1170,15 +956,18 @@ void best_fit_allocator<MI, MA>::AddNode(free_block *block)
             // color flip case
             // Mark both the parent and uncle as black
             // The grandparent is now red
-            current->GetParent()->SetColor(Black);
+            parent->SetColor(Black);
             uncle->SetColor(Black);
-            if (current->GetParent()->GetParent() != root) current->GetParent()->GetParent()->SetColor(Red);
-            current = current->GetParent()->GetParent();
+            if (grandparent != root) grandparent->SetColor(Red);
+            current = grandparent;
         }
         else // uncle is black
         {
-            bool newIsLeft = current->GetParent()->left == current;
-            current = current->GetParent();
+            bool newIsLeft = parent->left == current;
+            current = parent;
+
+            // Due to rotation operations below, "parent" should no longer be assumed to be
+            // the parent of the current.
             if (parentIsLeft)
             {
                 if (!newIsLeft)
@@ -1205,18 +994,14 @@ void best_fit_allocator<MI, MA>::AddNode(free_block *block)
             current->SetColor(Black);
             return;
         }
-    }
 
-#else
-    (void)block;
-#endif
+        parent = current->GetParent();
+    }
 }
 
 template <typename MI, size_t MA>
 void best_fit_allocator<MI, MA>::RemoveNode(free_block *block)
 {
-#if NODES_ENABLED
-
     // Will need these later for rebalancing
     free_block *doubleBlack = nullptr;
     free_block *dbParent = nullptr;
@@ -1459,8 +1244,4 @@ void best_fit_allocator<MI, MA>::RemoveNode(free_block *block)
             break;
         }   
     }
-
-#else
-    (void)block;
-#endif
 }
