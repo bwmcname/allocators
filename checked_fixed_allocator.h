@@ -16,7 +16,7 @@ struct checked_fixed_allocator
     fixed_size_allocator<allocator_interface> internal_allocator;
     alloc_block *head;
 
-    checked_fixed_allocator(allocator_interface *memory_provider, size_t chunk_count, size_t chunk_size, uint32_t chunk_alignment);
+    checked_fixed_allocator(allocator_interface *memory_provider, uint32_t chunk_count, size_t chunk_size, uint32_t chunk_alignment);
     checked_fixed_allocator(const checked_fixed_allocator &) = delete;
     checked_fixed_allocator() = delete;
 
@@ -48,7 +48,7 @@ void BM_LEAK_CHECK (alloc_block *first);
 template <typename allocator_interface>
 checked_fixed_allocator<allocator_interface>::checked_fixed_allocator(
     allocator_interface *memory_provider,
-    size_t chunk_count,
+    uint32_t chunk_count,
     size_t chunk_size,
     uint32_t chunk_alignment) :
     align_correction(sizeof(alloc_block) + (sizeof(alloc_block) % chunk_alignment)),

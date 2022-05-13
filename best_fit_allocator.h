@@ -672,6 +672,24 @@ void *best_fit_allocator<MI, MA>::ReAllocInternal(void *addr, size_t size, int l
 
         total += current->GetSize(this) + chunk_size;
 
+        if (total < size && current == last)
+        {
+            // Try to commit more memory.
+            uint8_t *unCommitted = (uint8_t *)base + mem_committed;
+            size_t requiredBytes = size - total;
+
+            if (requiredBytes + mem_committed <= mem_reserved)
+            {
+                size_t actualCommit;
+                memory_provider->Commit(unCommitted, requiredBytes, &actualCommit);
+
+                mem_committed += actualCommit;
+                total += actualCommit;
+                RemoveNode((free_block *)current);
+                AddNode((free_block *)current);
+            }
+        }
+
         if (total >= size)
         {
             // There are enough free blocks to satisfy this request.

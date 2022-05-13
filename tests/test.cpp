@@ -146,16 +146,18 @@ static void FixedAllocatorTests(allocator_interface *parentAllocator)
         char c;
     };
 
-    size_t numChunks = 1000;
+    uint32_t numChunks = 1000;
     checked_fixed_allocator<allocator_interface> allocator(parentAllocator, numChunks, sizeof(thingy), alignof(thingy));
 
+    size_t numAllocations = numChunks * 10;
+
     std::vector<void *> entries;
-    for (size_t i = 0; i < numChunks; ++i)
+    for (size_t i = 0; i < numAllocations; ++i)
     {
         entries.push_back(allocator.ALLOC_ONE());
     }
 
-    for (size_t i = 0; i < numChunks; ++i)
+    for (size_t i = 0; i < numAllocations; ++i)
     {
         allocator.FREE(entries[i]);
     }
@@ -317,7 +319,7 @@ int main()
     allocator_mem_interface<allocator_spin_lock<best_fit_allocator<win32_virtual_memory_interface>>> finalAlloc(&lockedAlloc, alignof(max_align_t));
     SlowRandomAllocTests(&finalAlloc);
 
-    // FixedAllocatorTests(&allocator);
+    FixedAllocatorTests(&finalAlloc);
 
     fclose(testLog);
     testLog = nullptr;

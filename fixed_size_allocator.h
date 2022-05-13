@@ -7,24 +7,40 @@
 
 struct free_chunk
 {
-	free_chunk *next_free;
+	free_chunk *m_nextFree;
+};
+
+struct bucket_header
+{
+    bucket_header *m_next;
+    uint32_t m_chunkCount;
 };
 
 template <typename allocator_interface>
 struct fixed_size_allocator
 {
-	fixed_size_allocator(allocator_interface *memory_provider, size_t size, size_t chunk_size, uint32_t chunk_alignment);
+	fixed_size_allocator(allocator_interface *memoryProvider, uint32_t chunkCount, size_t chunkSize, uint32_t chunkAlignment);
 	fixed_size_allocator(const fixed_size_allocator &) = delete;
 	fixed_size_allocator() = delete;
 
-	void *base;
-	void *free;
-	free_chunk *next_free;
-	allocator_interface *memory_provider;
+	bucket_header *m_base;
+	free_chunk *m_nextFree;
+	allocator_interface *m_memoryProvider;
+
+    size_t m_chunkSize;
+    uint32_t m_chunkCount;
+    uint32_t m_chunkAlignment;
 
 	~fixed_size_allocator();
 
 	DECLARE_ALLOCATOR_INTERFACE_METHODS();
+
+private:
+    bucket_header *NewBucket();
+    free_chunk *InitChunkRange(void *start, uint32_t chunkCount);
+    void *FirstChunk(bucket_header *bucket);
+    void *GetChunk(bucket_header *bucket, uint32_t i);
+    free_chunk *TryReallocBucket(bucket_header *bucket);
 };
 
 #define ALLOC_ONE() AllocInternal(0, 0, __LINE__, __FILE__)
@@ -38,25 +54,50 @@ struct fixed_size_allocator
 
 template <typename allocator_interface>
 fixed_size_allocator<allocator_interface>::fixed_size_allocator(
-	allocator_interface *memory_provider,
-	size_t chunk_count,
-	size_t chunk_size,
-	uint32_t chunk_alignment)
-    : memory_provider(memory_provider)
+	allocator_interface *memoryProvider,
+	uint32_t chunkCount,
+	size_t chunkSize,
+	uint32_t chunkAlignment)
+    : m_memoryProvider(memoryProvider),
+      m_chunkSize(chunkSize),
+      m_chunkCount(chunkCount),
+      m_chunkAlignment(chunkAlignment > alignof(bucket_header) ? chunkAlignment : alignof(bucket_header))
 {
-    size_t required_bytes = chunk_count * chunk_size;
-	base = memory_provider->ALLOC(required_bytes, chunk_alignment);
-	BM_ASSERT(base, "Failed to allocate enough memory");
+	m_base = NewBucket();
+    m_nextFree = (free_chunk *)FirstChunk(m_base);
+}
 
-	uint8_t *base_byte = (uint8_t *)base;
-	free_chunk *last_chunk = 0;
+template <typename allocator_interface>
+fixed_size_allocator<allocator_interface>::~fixed_size_allocator()
+{
+	m_memoryProvider->FREE(m_base);
+}
 
-	size_t i = chunk_count - 1;
+template <typename allocator_interface>
+bucket_header *fixed_size_allocator<allocator_interface>::NewBucket()
+{
+    size_t requiredBytes = sizeof(bucket_header) + ((m_chunkCount) * m_chunkSize);
+    bucket_header *bucket = (bucket_header *)m_memoryProvider->ALLOC(requiredBytes, m_chunkAlignment);
+    BM_ASSERT(bucket, "Failed to allocate enough memory");
+    bucket->m_next = nullptr;
+    bucket->m_chunkCount = m_chunkCount;
+
+    InitChunkRange(FirstChunk(bucket), m_chunkCount);
+
+    return bucket;
+}
+
+template <typename allocator_interface>
+free_chunk *fixed_size_allocator<allocator_interface>::InitChunkRange(void *start, uint32_t count)
+{
+    uint8_t *baseByte = (uint8_t *)start;
+    free_chunk *lastChunk = 0;
+	uint32_t i = count - 1;
 	for (;;)
 	{
-		free_chunk *chunk = (free_chunk *)(&base_byte[i * chunk_size]);
-		chunk->next_free = last_chunk;
-		last_chunk = chunk;
+		free_chunk *chunk = (free_chunk *)(&baseByte[i * m_chunkSize]);
+		chunk->m_nextFree = lastChunk;
+		lastChunk = chunk;
 
 		if (i-- == 0)
 		{
@@ -64,13 +105,35 @@ fixed_size_allocator<allocator_interface>::fixed_size_allocator(
 		}
 	}
 
-    next_free = last_chunk;
+    return (free_chunk *)baseByte;
 }
 
 template <typename allocator_interface>
-fixed_size_allocator<allocator_interface>::~fixed_size_allocator()
+void *fixed_size_allocator<allocator_interface>::FirstChunk(bucket_header *bucket)
 {
-	memory_provider->FREE(base);
+    return (void *)(bucket + 1);
+}
+
+template <typename allocator_interface>
+void *fixed_size_allocator<allocator_interface>::GetChunk(bucket_header *bucket, uint32_t i)
+{
+    uint8_t *first = (uint8_t *)FirstChunk(bucket);
+    return (void *)(first + (m_chunkSize * i));
+}
+
+template <typename allocator_interface>
+free_chunk *fixed_size_allocator<allocator_interface>::TryReallocBucket(bucket_header *header)
+{
+    uint32_t newChunkCount = header->m_chunkCount + m_chunkCount;
+    if (m_memoryProvider->REALLOC(header, sizeof(bucket_header) + (newChunkCount * m_chunkSize)) == nullptr)
+    {
+        return nullptr;
+    }
+
+    free_chunk *first = InitChunkRange(GetChunk(header, header->m_chunkCount), m_chunkCount);
+    header->m_chunkCount = newChunkCount;
+
+    return first;
 }
 
 template <typename allocator_interface>
@@ -81,13 +144,30 @@ void *fixed_size_allocator<allocator_interface>::AllocInternal(size_t size, uint
     (void)file;
     (void)alignment;
 
-	if (next_free == nullptr)
+	if (m_nextFree == nullptr)
 	{
-		return nullptr;
+        // First, try to realloc the mem from an existing bucket
+        for (bucket_header *bucket = m_base; bucket != nullptr; bucket = bucket->m_next)
+        {
+            free_chunk *newChunk = TryReallocBucket(bucket);
+            if (newChunk)
+            {
+                m_nextFree = newChunk->m_nextFree;
+                return (void *)newChunk;
+            }
+        }
+
+        // No memory could be reallocated, add a new bucket
+        bucket_header *newBucket = NewBucket();
+        newBucket->m_next = m_base;
+        m_base = newBucket;
+        free_chunk *first = (free_chunk *)FirstChunk(newBucket);
+        m_nextFree = first->m_nextFree;
+        return first;
 	}
 
-	free_chunk *chunk = next_free;
-	next_free = chunk->next_free;
+	free_chunk *chunk = m_nextFree;
+	m_nextFree = chunk->m_nextFree;
 	return (void *)chunk;
 }
 
@@ -98,8 +178,8 @@ void fixed_size_allocator<allocator_interface>::FreeInternal(void *addr, int lin
     (void)file;
     
 	free_chunk *chunk = (free_chunk *)addr;
-	chunk->next_free = next_free;
-	next_free = chunk;
+	chunk->m_nextFree = m_nextFree;
+	m_nextFree = chunk;
 }
 
 template <typename allocator_interface>

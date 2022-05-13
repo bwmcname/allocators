@@ -9,5 +9,5 @@ set drmemflags=/MT /EHsc /Oy- /Ob0
 
 if not exist "%main%\bin" mkdir %main%\bin
 pushd %main%\bin
-cl %code%\test.cpp -Fetest.exe %flags% %warn% -Zi -O2
+cl %code%\test.cpp -Fetest.exe %flags% %warn% -Zi
 popd
