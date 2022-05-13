@@ -15,7 +15,7 @@
 #include <unordered_set>
 #pragma warning(pop)
 
-#define CORRUPTION_DETECTION_ENABLED 0
+#define CORRUPTION_DETECTION_ENABLED 1
 
 FILE *testLog = nullptr;
 void MyAssert(bool value, const char *message, int line, const char *file)
@@ -76,6 +76,9 @@ void MyAssert(bool value, const char *message, int line, const char *file)
 #define BM_BEST_FIT_ALLOCATOR_IMPLEMENTATION
 #include "best_fit_allocator.h"
 #undef BM_BEST_FIT_ALLOCATOR_IMPLEMENTATION
+
+#include "allocator_spinlock.h"
+#include "allocator_mem_interface.h"
 
 void CheckForLeaks(alloc_block *block)
 {
@@ -205,8 +208,7 @@ void PrintAlignment(void *addr)
 template <typename allocator_t>
 void SlowRandomAllocTests(allocator_t *allocator)
 {
-    // unsigned seed = (unsigned)__rdtsc();
-    unsigned seed = 0xDEADBEEF;
+    unsigned seed = (unsigned)__rdtsc();
     printf("Seed: %u\n", seed);
     srand(seed);
     printf("SlowRandomAllocTest\n");
@@ -218,7 +220,7 @@ void SlowRandomAllocTests(allocator_t *allocator)
     int timedOpIndex = -1;
 
     uint64_t begin = __rdtsc();
-    int actionCount = 4;
+    int actionCount = 10000;
     for (int i = 0; i < actionCount; ++i)
     {        
         int val = rand() % 10;
@@ -291,10 +293,6 @@ void SlowRandomAllocTests(allocator_t *allocator)
             maxTimedOp = timedOpElapsed;
             timedOpIndex = i;
         }
-
-#if CORRUPTION_DETECTION_ENABLED 
-        allocator->DetectCorruption();
-#endif
     }
 
     uint64_t total = __rdtsc() - begin;
@@ -314,8 +312,10 @@ int main()
     // MemoryInterfaceTests(&mem);
 
     // Reserve 8 gigabytes
-    best_fit_allocator<win32_virtual_memory_interface> allocator(&mem, Gigabytes(8));
-    SlowRandomAllocTests(&allocator);
+    best_fit_allocator<win32_virtual_memory_interface> bestFit(&mem, Gigabytes(8));
+    allocator_spin_lock<best_fit_allocator<win32_virtual_memory_interface>> lockedAlloc(&bestFit);
+    allocator_mem_interface<allocator_spin_lock<best_fit_allocator<win32_virtual_memory_interface>>> finalAlloc(&lockedAlloc, alignof(max_align_t));
+    SlowRandomAllocTests(&finalAlloc);
 
     // FixedAllocatorTests(&allocator);
 

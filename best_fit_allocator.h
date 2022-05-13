@@ -55,7 +55,7 @@ struct best_fit_allocator
 
     ~best_fit_allocator();
 
-    DECLARE_ALLOCATOR_INTERFACE_METHODS();
+    DECLARE_ALLOCATOR_INTERFACE_METHODS();    
     
     // Corruption detection.
     void DetectCorruption();
