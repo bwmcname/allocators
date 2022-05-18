@@ -49,7 +49,7 @@ private:
 #pragma warning(push, 0)
 #include <assert.h>
 #pragma warning(pop)
-#define BM_ASSERT(val) assert(val)
+#define BM_ASSERT(val, msg) assert(val)
 #endif
 
 template <typename allocator_interface>
@@ -78,7 +78,7 @@ bucket_header *fixed_size_allocator<allocator_interface>::NewBucket()
 {
     size_t requiredBytes = sizeof(bucket_header) + ((m_chunkCount) * m_chunkSize);
     bucket_header *bucket = (bucket_header *)m_memoryProvider->ALLOC(requiredBytes, m_chunkAlignment);
-    BM_ASSERT(bucket);
+    BM_ASSERT(bucket, "Failed to allocate enough memory");
     bucket->m_next = nullptr;
     bucket->m_chunkCount = m_chunkCount;
 
@@ -186,6 +186,6 @@ template <typename allocator_interface>
 void *fixed_size_allocator<allocator_interface>::ReAllocInternal(void *addr, size_t size, int line, const char *file)
 {
 	// Maybe there is something clever we can do here... dunno.
-    BM_ASSERT(false);
+    BM_ASSERT(false, "Unimplemented");
 	return nullptr;
 }
