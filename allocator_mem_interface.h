@@ -6,7 +6,7 @@
 template <typename T>
 struct allocator_mem_interface
 {
-    allocator_mem_interface(T *allocator, uint32_t pageSize);
+    allocator_mem_interface(T *allocator, uint32_t minAlignment);
 
     uint32_t m_minAlignment; 
     T *m_allocator;
