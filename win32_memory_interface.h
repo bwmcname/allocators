@@ -27,7 +27,7 @@ struct win32_virtual_memory_interface
 #pragma warning(push, 0)
 #include <assert.h>
 #pragma warning(pop)
-#define BM_ASSERT(val) assert(val)
+#define BM_ASSERT(val, msg) assert(val)
 #endif
 
 win32_virtual_memory_interface::win32_virtual_memory_interface()

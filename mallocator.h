@@ -1,5 +1,7 @@
 
 #pragma once
+#pragma warning(push, 0)
+#include "allocator_interface.h"
 
 struct mallocator
 {
@@ -7,10 +9,7 @@ struct mallocator
 };
 
 #ifdef BM_MALLOCATOR_IMPLEMENTATION
-
-#pragma warning(push, 0)
 #include <stdlib.h>
-#pragma warning(pop)
 
 void *
 mallocator::AllocInternal(size_t size, uint32_t alignment, int line, const char *file)
@@ -36,3 +35,4 @@ mallocator::ReAllocInternal(void *addr, size_t size, int line, const char *file)
     return realloc(addr, size);
 }
 #endif
+#pragma warning(pop)

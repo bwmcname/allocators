@@ -43,8 +43,6 @@ private:
     free_chunk *TryReallocBucket(bucket_header *bucket);
 };
 
-#define ALLOC_ONE() AllocInternal(0, 0, __LINE__, __FILE__)
-
 #if !defined(BM_ASSERT)
 #pragma warning(push, 0)
 #include <assert.h>

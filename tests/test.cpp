@@ -16,6 +16,42 @@
 #pragma warning(pop)
 
 #define CORRUPTION_DETECTION_ENABLED 1
+size_t leak_checker = 0;
+
+void *OnAlloc(void *newAlloc, size_t size, uint32_t alignment, int line, const char *file)
+{
+    (void)size;
+    (void)alignment;
+    (void)line;
+    (void)file;
+
+    leak_checker ^= (size_t)newAlloc;
+    return newAlloc;
+}
+
+void *OnReAlloc(void *newAlloc, void *oldAlloc, size_t size, int line, const char *file)
+{
+    (void)newAlloc;
+    (void)oldAlloc;
+    (void)size;
+    (void)line;
+    (void)file;
+    leak_checker ^= ((size_t)newAlloc);
+    leak_checker ^= !!(size_t)newAlloc * ((size_t)oldAlloc);
+    return newAlloc;
+}
+
+void OnFree(void *freed, int line, const char *file)
+{
+    (void)freed;
+    (void)line;
+    (void)file;
+    leak_checker ^= (size_t)freed;
+}
+
+#define TRACKALLOC(mem, size, alignment, line, file) OnAlloc(mem, size, alignment, line, file)
+#define TRACKFREE(mem, line, file) OnFree(mem, line, file)
+#define TRACKREALLOC(newMem, oldMem, size, line, file) OnReAlloc(newMem, oldMem, size, line, file)
 
 FILE *testLog = nullptr;
 void MyAssert(bool value, const char *message, int line, const char *file)
@@ -154,7 +190,7 @@ static void FixedAllocatorTests(allocator_interface *parentAllocator)
     std::vector<void *> entries;
     for (size_t i = 0; i < numAllocations; ++i)
     {
-        entries.push_back(allocator.ALLOC_ONE());
+        entries.push_back(allocator.ALLOC(sizeof(thingy), alignof(thingy)));
     }
 
     for (size_t i = 0; i < numAllocations; ++i)
@@ -216,7 +252,6 @@ void SlowRandomAllocTests(allocator_t *allocator)
     printf("SlowRandomAllocTest\n");
 
     std::map<void *, size_t> allocations;
-    std::unordered_map<void *, char *> allocatedStrings;
 
     uint64_t maxTimedOp = 0;
     int timedOpIndex = -1;
@@ -253,6 +288,12 @@ void SlowRandomAllocTests(allocator_t *allocator)
             void *ptr = allocator->REALLOC(it->first, newSize);
             (void)ptr;
             (void)oldSize;
+
+            if (ptr)
+            {
+                allocations.erase(it);
+                allocations[ptr] = newSize;
+            }
 
 #if CORRUPTION_DETECTION_ENABLED
             if (ptr)
@@ -297,6 +338,11 @@ void SlowRandomAllocTests(allocator_t *allocator)
         }
     }
 
+    for (auto it = allocations.begin(); it != allocations.end(); ++it)
+    {
+        allocator->FREE(it->first);
+    }
+
     uint64_t total = __rdtsc() - begin;
     printf("SUCCESS [Elapsed=%llu]\n", total);
     printf("Max Op [Elapsed=%llu, Index=%i]\n", maxTimedOp, timedOpIndex);
@@ -323,5 +369,8 @@ int main()
 
     fclose(testLog);
     testLog = nullptr;
+
+    assert(leak_checker == 0);
+
     return 0;
 }
