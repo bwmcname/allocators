@@ -143,7 +143,7 @@ void fixed_size_allocator<allocator_interface>::FreeBucketRecursive(bucket_heade
         FreeBucketRecursive(header->m_next);
     }
 
-    m_memoryProvider->FreeInternal(header);
+    m_memoryProvider->FreeInternal(header, __LINE__, __FILE__);
 }
 
 template <typename allocator_interface>
