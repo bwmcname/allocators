@@ -31,7 +31,7 @@ template <typename T>
 void *allocator_mem_interface<T>::Reserve(size_t size, size_t *actual)
 {
     *actual = size;
-    return m_allocator.ALLOC(size, m_minAlignment);
+    return m_allocator.AllocInternal(size, m_minAlignment, __LINE__, __FILE__);
 }
 
 template <typename T>
@@ -43,7 +43,7 @@ void allocator_mem_interface<T>::DeCommit(void *addr, size_t size)
 template <typename T>
 void allocator_mem_interface<T>::Release(void *addr)
 {
-    m_allocator.FREE(addr);
+    m_allocator.FreeInternal(addr, __LINE__, __FILE__);
 }
 
 template <typename T>

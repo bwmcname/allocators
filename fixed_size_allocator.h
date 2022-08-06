@@ -41,6 +41,7 @@ private:
     void *FirstChunk(bucket_header *bucket);
     void *GetChunk(bucket_header *bucket, uint32_t i);
     free_chunk *TryReallocBucket(bucket_header *bucket);
+    void FreeBucketRecursive(bucket_header *header);
 };
 
 #if !defined(BM_ASSERT)
@@ -68,14 +69,14 @@ fixed_size_allocator<allocator_interface>::fixed_size_allocator(
 template <typename allocator_interface>
 fixed_size_allocator<allocator_interface>::~fixed_size_allocator()
 {
-	m_memoryProvider->FREE(m_base);
+	FreeBucketRecursive(m_base);
 }
 
 template <typename allocator_interface>
 bucket_header *fixed_size_allocator<allocator_interface>::NewBucket()
 {
     size_t requiredBytes = sizeof(bucket_header) + ((m_chunkCount) * m_chunkSize);
-    bucket_header *bucket = (bucket_header *)m_memoryProvider->ALLOC(requiredBytes, m_chunkAlignment);
+    bucket_header *bucket = (bucket_header *)m_memoryProvider->AllocInternal(requiredBytes, m_chunkAlignment, __LINE__, __FILE__);
     BM_ASSERT(bucket, "Failed to allocate enough memory");
     bucket->m_next = nullptr;
     bucket->m_chunkCount = m_chunkCount;
@@ -123,7 +124,7 @@ template <typename allocator_interface>
 free_chunk *fixed_size_allocator<allocator_interface>::TryReallocBucket(bucket_header *header)
 {
     uint32_t newChunkCount = header->m_chunkCount + m_chunkCount;
-    if (m_memoryProvider->REALLOC(header, sizeof(bucket_header) + (newChunkCount * m_chunkSize)) == nullptr)
+    if (m_memoryProvider->ReAllocInternal(header, sizeof(bucket_header) + (newChunkCount * m_chunkSize), __LINE__, __FILE__) == nullptr)
     {
         return nullptr;
     }
@@ -132,6 +133,17 @@ free_chunk *fixed_size_allocator<allocator_interface>::TryReallocBucket(bucket_h
     header->m_chunkCount = newChunkCount;
 
     return first;
+}
+
+template <typename allocator_interface>
+void fixed_size_allocator<allocator_interface>::FreeBucketRecursive(bucket_header *header)
+{
+    if (header->m_next)
+    {
+        FreeBucketRecursive(header->m_next);
+    }
+
+    m_memoryProvider->FreeInternal(header);
 }
 
 template <typename allocator_interface>

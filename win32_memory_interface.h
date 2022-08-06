@@ -1,6 +1,5 @@
-
-#pragma once
-
+#ifndef WIN32_MEMORY_INTERFACE_H
+#define WIN32_MEMORY_INTERFACE_H
 #include "memory_interface.h"
 
 #pragma warning(push, 0)
@@ -16,6 +15,8 @@ struct win32_virtual_memory_interface
 
     DECLARE_MEMORY_INTERFACE_METHODS();
 };
+
+#endif
 
 #if defined(BM_WIN32_MEMORY_INTERFACE_IMPLEMENTATION)
 
