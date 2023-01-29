@@ -3,35 +3,29 @@
 #include "memory_interface.h"
 #include "allocator_interface.h"
 
-#pragma warning(push, 0)
 #ifdef USE_STL
 #include <unordered_map>
 #endif
-#pragma warning(pop)
 
 #ifdef _MSC_VER
 #define BM_RESTRICT __restrict
 #endif
 
-#pragma warning(suppress: 4514)
 static constexpr bool IsPowerOf2(size_t value)
 {
     return value && !(value & (value - 1));
 }
 
-#pragma warning(suppress: 4514)
 static constexpr size_t SnapUpToPow2Increment(size_t value, size_t increment)
 {
     return (value + increment - 1) & ~(increment - 1);
 }
 
-#pragma warning(suppress: 4514)
 static constexpr size_t SnapUpToIncrement(size_t value, size_t increment)
 {
     return increment * ((value / increment) + (value % increment == 0 ? 0 : 1));
 }
 
-#pragma warning(suppress: 4514)
 static inline void *SnapUpToPow2Increment(void *value, size_t increment)
 {
     return (void *)SnapUpToPow2Increment((size_t)value, increment);
@@ -54,6 +48,7 @@ struct best_fit_allocator
     best_fit_allocator() = delete;
 
     ~best_fit_allocator();
+
 
     DECLARE_ALLOCATOR_INTERFACE_METHODS();    
     
@@ -164,7 +159,7 @@ private:
     free_block *root;
 
     bool IsCommitted(void *addr, size_t size);
-    void GetCommitParams(void *requestedAddress, size_t requestedSize, void **paramAddress, size_t *paramSize);
+    void GetCommitParams(size_t requestedSize, void **paramAddress, size_t *paramSize);
     free_block *FindBestFit(size_t size);
     void *GetAllocationPtr(free_block *block);
     void *GetAllocationPtr(block_header *header);
@@ -184,9 +179,7 @@ private:
 };
 
 #if !defined(BM_ASSERT)
-#pragma warning(push, 0)
 #include <assert.h>
-#pragma warning(pop)
 #define BM_ASSERT(val, msg) assert(val)
 #endif
 
@@ -314,7 +307,6 @@ typename best_fit_allocator<MI, MA>::free_block *best_fit_allocator<MI, MA>::Get
     return (free_block *)((uint8_t *)addr - chunk_size);
 }
 
-#pragma warning(suppress: 4514)
 inline size_t GetAlignment(void *addr)
 {
     size_t data = (size_t)addr;
@@ -502,7 +494,7 @@ template<typename MI, size_t MA>
 best_fit_allocator<MI, MA>::~best_fit_allocator()
 {
     memory_provider->DeCommit(base, mem_committed);
-    memory_provider->Release(base);
+    memory_provider->Release(base, mem_reserved);
 }
 
 template <typename MI, size_t MA>
@@ -515,7 +507,7 @@ bool best_fit_allocator<MI, MA>::IsCommitted(void *addr, size_t size)
 }
 
 template <typename MI, size_t MA>
-void best_fit_allocator<MI, MA>::GetCommitParams(void *requestedAddress, size_t requestedSize, void **paramAddress, size_t *paramSize)
+void best_fit_allocator<MI, MA>::GetCommitParams(size_t requestedSize, void **paramAddress, size_t *paramSize)
 {
     uint8_t *commitEnd = (uint8_t *)base + mem_committed;
     size_t difference = commitEnd - (uint8_t *)base;

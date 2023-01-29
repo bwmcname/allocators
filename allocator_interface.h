@@ -1,8 +1,6 @@
 
 #pragma once
-#pragma warning(push, 0)
 #include <stdint.h>
-#pragma warning(pop)
 
 
 #if 0
@@ -54,7 +52,6 @@ void PostFreeThunk(void *mem, int line, const char *file) {}
 
 #ifdef MEM_TRACKING_ENABLED
 #define DECLARE_ALLOCATOR_INTERFACE_METHODS()                           \
-    __pragma(warning(push, 0))                                          \
     void *AllocInternal(size_t size, uint32_t alignment, int line, const char *file); \
     void FreeInternal(void *addr, int line, const char *file);          \
     void *ReAllocInternal(void *addr, size_t size, int line, const char *file); \
@@ -77,8 +74,11 @@ void PostFreeThunk(void *mem, int line, const char *file) {}
         void *result = ReAllocInternal(addr, size, line, file);         \
         POSTREALLOC_CALLBACK(result, addr, size, line, file);           \
         return result;                                                  \
-    }                                                                   \
-    __pragma(warning(pop)) 
+    }
+
+#undef DISABLE_ALL_WARNINGS_BEGIN
+#undef DISABLE_ALL_WARNINGS_END
+    
 #define ALLOC(size, alignment) TrackedAllocInternal(size, alignment, __LINE__, __FILE__)
 #define FREE(addr) TrackedFreeInternal(addr, __LINE__, __FILE__)
 #define REALLOC(addr, size) TrackedReAllocInternal(addr, size, __LINE__, __FILE__)

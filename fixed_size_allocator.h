@@ -1,9 +1,6 @@
 #pragma once
 #include "allocator_interface.h"
-
-#pragma warning(push, 0)
 #include <stdint.h>
-#pragma warning(pop)
 
 struct free_chunk
 {
@@ -45,9 +42,7 @@ private:
 };
 
 #if !defined(BM_ASSERT)
-#pragma warning(push, 0)
 #include <assert.h>
-#pragma warning(pop)
 #define BM_ASSERT(val, msg) assert(val)
 #endif
 
@@ -58,7 +53,7 @@ fixed_size_allocator<allocator_interface>::fixed_size_allocator(
 	size_t chunkSize,
 	uint32_t chunkAlignment)
     : m_memoryProvider(memoryProvider),
-      m_chunkSize(chunkSize),
+      m_chunkSize(chunkSize > sizeof(free_chunk) ? chunkSize : sizeof(free_chunk)),
       m_chunkCount(chunkCount),
       m_chunkAlignment(chunkAlignment > alignof(bucket_header) ? chunkAlignment : alignof(bucket_header))
 {
@@ -195,6 +190,10 @@ void fixed_size_allocator<allocator_interface>::FreeInternal(void *addr, int lin
 template <typename allocator_interface>
 void *fixed_size_allocator<allocator_interface>::ReAllocInternal(void *addr, size_t size, int line, const char *file)
 {
+    (void)addr;
+    (void)size;
+    (void)line;
+    (void)file;
 	// Maybe there is something clever we can do here... dunno.
     BM_ASSERT(false, "Unimplemented");
 	return nullptr;

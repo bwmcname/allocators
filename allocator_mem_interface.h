@@ -24,6 +24,9 @@ allocator_mem_interface<T>::allocator_mem_interface(T *allocator, uint32_t minAl
 template <typename T>
 void allocator_mem_interface<T>::Commit(void *addr, size_t size, size_t *actual)
 {
+    (void)addr;
+    (void)size;
+    (void)actual;
     // Nothing to do.
 }
 
@@ -31,19 +34,22 @@ template <typename T>
 void *allocator_mem_interface<T>::Reserve(size_t size, size_t *actual)
 {
     *actual = size;
-    return m_allocator.AllocInternal(size, m_minAlignment, __LINE__, __FILE__);
+    return m_allocator->AllocInternal(size, m_minAlignment, __LINE__, __FILE__);
 }
 
 template <typename T>
 void allocator_mem_interface<T>::DeCommit(void *addr, size_t size)
 {
+    (void)addr;
+    (void)size;
     // Nothing to do
 }
 
 template <typename T>
-void allocator_mem_interface<T>::Release(void *addr)
+void allocator_mem_interface<T>::Release(void *addr, size_t size)
 {
-    m_allocator.FreeInternal(addr, __LINE__, __FILE__);
+    (void)size;
+    m_allocator->FreeInternal(addr, __LINE__, __FILE__);
 }
 
 template <typename T>
